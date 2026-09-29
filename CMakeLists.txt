@@ -1,0 +1,105 @@
+cmake_minimum_required(VERSION 3.20)
+project(fake_cuda VERSION 1.0 LANGUAGES C CXX)
+
+# Build against CUDA 13 headers from this project's uv environment. CUDA 12
+# clients use the versioned Driver ABI; neither the CUDA toolkit nor GPU is
+# needed to link the shim.
+set(CUDA_DRIVER_INCLUDE_DIR
+    "${PROJECT_SOURCE_DIR}/.venv-cu130/lib/python3.12/site-packages/nvidia/cu13/include"
+    CACHE PATH "CUDA 13 Driver include directory")
+if(NOT EXISTS "${CUDA_DRIVER_INCLUDE_DIR}/cuda.h")
+    message(FATAL_ERROR "CUDA 13 cuda.h not found at ${CUDA_DRIVER_INCLUDE_DIR}; run bash tests/setup_uv.sh first")
+endif()
+file(STRINGS "${CUDA_DRIVER_INCLUDE_DIR}/cuda.h" driver_version_line
+    REGEX "^#define CUDA_VERSION [0-9]+" LIMIT_COUNT 1)
+if(NOT driver_version_line MATCHES "CUDA_VERSION 13[0-9]+")
+    message(FATAL_ERROR "CUDA 13 headers required to build this shim: ${driver_version_line}")
+endif()
+message(STATUS "CUDA Driver headers: ${CUDA_DRIVER_INCLUDE_DIR}")
+
+find_package(Threads REQUIRED)
+
+add_library(fake_cuda SHARED
+    src/driver_api/common.c
+    src/driver_api/cu12.c
+    src/driver_api/cu13.c
+    src/impl/core.cpp
+    src/impl/private.cpp
+    src/impl/capture.cpp
+    src/impl/graph.cpp
+    src/impl/queue_scheduler.cpp
+    src/impl/scheduler.cpp
+    src/impl/virtual_memory.cpp
+    src/impl/virtual_work.cpp)
+target_compile_features(fake_cuda PRIVATE c_std_11 cxx_std_23)
+target_include_directories(fake_cuda PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+    "${CUDA_DRIVER_INCLUDE_DIR}")
+target_compile_options(fake_cuda PRIVATE -Wall -Wextra)
+target_link_libraries(fake_cuda PRIVATE Threads::Threads)
+set_target_properties(fake_cuda PROPERTIES
+    C_EXTENSIONS OFF
+    CXX_EXTENSIONS OFF
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    OUTPUT_NAME cuda
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+    LINK_DEPENDS "${PROJECT_SOURCE_DIR}/exports.map")
+target_link_options(fake_cuda PRIVATE
+    "LINKER:--version-script=${PROJECT_SOURCE_DIR}/exports.map")
+
+include(CTest)
+if(BUILD_TESTING)
+    foreach(probe IN ITEMS driver_probe virtual_driver_probe virtual_multistream_probe
+            multidevice_probe virtual_thread_probe)
+        add_executable(${probe} "tests/unit/${probe}.cpp")
+        target_compile_features(${probe} PRIVATE cxx_std_23)
+        target_include_directories(${probe} PRIVATE "${CUDA_DRIVER_INCLUDE_DIR}")
+        target_link_libraries(${probe} PRIVATE ${CMAKE_DL_LIBS})
+        set_target_properties(${probe} PROPERTIES CXX_EXTENSIONS OFF)
+    endforeach()
+    target_link_libraries(virtual_driver_probe PRIVATE m)
+    target_link_libraries(virtual_multistream_probe PRIVATE m)
+    target_link_libraries(virtual_thread_probe PRIVATE Threads::Threads)
+    add_executable(graph_lifecycle_probe tests/unit/graph_lifecycle_probe.cpp)
+    target_compile_features(graph_lifecycle_probe PRIVATE cxx_std_23)
+    target_include_directories(graph_lifecycle_probe PRIVATE "${CUDA_DRIVER_INCLUDE_DIR}")
+    target_link_libraries(graph_lifecycle_probe PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(graph_lifecycle_probe PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME graph_lifecycle_probe COMMAND graph_lifecycle_probe "$<TARGET_FILE:fake_cuda>")
+    set_tests_properties(graph_lifecycle_probe PROPERTIES TIMEOUT 10)
+
+    add_executable(api_contract tests/unit/api_contract.cpp)
+    target_compile_features(api_contract PRIVATE cxx_std_23)
+    target_include_directories(api_contract PRIVATE "${CUDA_DRIVER_INCLUDE_DIR}")
+    target_link_libraries(api_contract PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(api_contract PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME api_contract COMMAND api_contract "$<TARGET_FILE:fake_cuda>")
+    set_tests_properties(api_contract PROPERTIES TIMEOUT 20)
+    add_test(NAME driver_probe_cuda13 COMMAND driver_probe "$<TARGET_FILE:fake_cuda>")
+    add_test(NAME virtual_driver_probe COMMAND virtual_driver_probe "$<TARGET_FILE:fake_cuda>")
+    add_test(NAME virtual_multistream_probe COMMAND virtual_multistream_probe "$<TARGET_FILE:fake_cuda>")
+    set_tests_properties(virtual_driver_probe virtual_multistream_probe PROPERTIES TIMEOUT 10)
+
+    add_test(NAME multidevice_probe COMMAND multidevice_probe "$<TARGET_FILE:fake_cuda>")
+    set_tests_properties(multidevice_probe PROPERTIES
+        ENVIRONMENT "FAKE_CUDA_DEVICE_COUNT=2"
+        TIMEOUT 15)
+
+    add_test(NAME virtual_thread_probe COMMAND virtual_thread_probe "$<TARGET_FILE:fake_cuda>")
+    set_tests_properties(virtual_thread_probe PROPERTIES TIMEOUT 20)
+
+    set(CUDA12_DRIVER_INCLUDE_DIR
+        "${PROJECT_SOURCE_DIR}/.venv-cu128/lib/python3.12/site-packages/nvidia/cuda_runtime/include"
+        CACHE PATH "Optional CUDA 12 Driver include directory for the ABI probe")
+    if(EXISTS "${CUDA12_DRIVER_INCLUDE_DIR}/cuda.h")
+        add_executable(driver_probe_cuda12 tests/unit/driver_probe.cpp)
+        target_compile_features(driver_probe_cuda12 PRIVATE cxx_std_23)
+        target_include_directories(driver_probe_cuda12 PRIVATE "${CUDA12_DRIVER_INCLUDE_DIR}")
+        target_link_libraries(driver_probe_cuda12 PRIVATE ${CMAKE_DL_LIBS})
+        set_target_properties(driver_probe_cuda12 PROPERTIES CXX_EXTENSIONS OFF)
+        add_test(NAME driver_probe_cuda12 COMMAND driver_probe_cuda12 "$<TARGET_FILE:fake_cuda>")
+    endif()
+endif()

@@ -1,0 +1,25 @@
+# Local build artifacts
+/build/
+/build-*/
+/cmake-build-*/
+
+# Python environments and caches
+.venv/
+.venv-*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+
+# Local settings and credentials
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.zed/
+.DS_Store

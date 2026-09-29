@@ -1,0 +1,87 @@
+# Python integration probes
+
+Run from the repository root. The documented entry points remain at `tests/`;
+`run_no_gpu.sh` runs `pytorch/` probes in an offline, GPU-free Docker container:
+
+```sh
+bash tests/setup_uv.sh
+bash tests/run_no_gpu.sh all
+bash tests/run_no_gpu.sh all tensor
+bash tests/run_no_gpu.sh all multidevice
+bash tests/run_no_gpu.sh all memory    # allocations, H2D/D2D/D2H call paths, sync + async
+bash tests/run_no_gpu.sh all streams   # multiple streams, virtual copies, event wait/query/sync
+bash tests/run_no_gpu.sh all graph     # CUDAGraph virtual D2D/event capture + two replays
+```
+
+`ctest` also runs `graph_lifecycle_probe`, which checks cross-stream event dependencies, node enumeration during and after capture, and two independent executable handles replayed after the source graph is destroyed. It verifies control flow only, not device data.
+
+The `memory` probe checks allocation identity/capacity and that PyTorch's
+synchronous and asynchronous copy APIs can be submitted and synchronized; it
+**cannot** check bytes, which this driver does not copy. The `streams` probe
+records and waits on events around virtual copies on distinct streams, without
+assuming that a Python-level timing measurement is reliable. Both probes pass
+for CUDA 12.8 and 13.0 wheels in the no-GPU container.
+
+`graph` exercises PyTorch `CUDAGraph` capture of virtual D2D and event
+record/wait operations, two replays, and a cross-stream completion wait. It
+passes with both CUDA 12.8 and 13.0 wheels without suppressing exceptions.
+The original `cudaErrorCallRequiresNewerDriver` occurred in the Runtime's
+pre-capture lazy kernel load: it needed `cuLibraryLoadData`. The Runtime then
+used `cuStreamGetCaptureInfo`, `cuGraphGetNodes`, and
+`cuGraphInstantiateWithFlags` along the actual capture/replay path; these
+Driver entry points now have targeted ABI/semantics tests. Graphs with
+allocation/free during capture or per-node kernel priorities remain outside
+the supported simulator subset; no device data is copied or computed.
+
+`tests/compare_real_gh200.py` and `tests/benchmark_real_bandwidth.py` remain
+compatible command paths for the optional **real-GPU-only** scripts in `tooling/`.
+They must not be used as fake-driver numerical tests.
+
+## Framework startup stages (not inference)
+
+Install vLLM and SGLang in **separate** uv venvs (see `AGENTS.md` for tested
+versions and environment notes). Each environment must be mountable in Docker
+at the same absolute path. Run the individual probes through the existing runner:
+
+```sh
+bash tests/run_framework_no_gpu.sh vllm /absolute/path/to/vllm-venv
+bash tests/run_framework_no_gpu.sh sglang /absolute/path/to/sglang-venv
+# Optional: attempt engine startup with an existing LOCAL model directory:
+bash tests/run_framework_no_gpu.sh vllm /absolute/path/to/vllm-venv /absolute/path/to/model
+bash tests/run_framework_no_gpu.sh sglang /absolute/path/to/sglang-venv /absolute/path/to/model
+```
+
+The runner uses `--runtime=runc --network=none --pull=never`, mounts the driver,
+venv and optional model read-only, disables Hugging Face hub downloads, and
+limits the Docker probe to **300 seconds**. A timeout is a failure (exit 124),
+not a successful startup. With no model, engine startup is **skipped**: only
+Torch CUDA device discovery, framework import, and vLLM platform detection or
+SGLang Engine import are checked. With a model, each probe additionally attempts
+engine construction; it does **not** call generate or validate any output.
+Each stage prints `STAGE`, `PASS` or `FAIL`; failures retain their traceback.
+
+Observed previously with vLLM 0.26.0: CUDA platform detection depends on NVML,
+which is outside this Driver-only project's scope. The installed Python NVML
+binding cannot replace native `libnvidia-ml.so.1` or supply a virtual NVML
+device count; installing `pynvml` via uv does not solve platform detection.
+For **diagnosis only**, `FAKE_CUDA_VLLM_DIAGNOSE_WITHOUT_NVML=1 bash
+tests/run_framework_no_gpu.sh vllm /absolute/path/to/vllm-venv` overrides
+vLLM's platform detector inside the probe process to reveal the next blocker.
+It does not exercise normal vLLM platform selection and must never be reported
+as a successful end-to-end run. In this environment the diagnostic progresses
+to importing `vllm.platforms.cuda`, which currently fails because the native
+vLLM extension requires the missing Driver symbol `cuTensorMapEncodeTiled`.
+This API encodes a real hardware TMA descriptor, not a virtual memcpy; exporting
+a dummy that returns unconditional success would misrepresent kernel behavior. The vLLM probe reports a
+non-CUDA platform as **blocked** rather than claiming an engine started; check
+its logs before attributing a failure with another installation to NVML.
+Observed previously with SGLang 0.5.17: `Engine` imports, but local-model
+startup has not been verified. Missing dependencies, incompatible wheels, or
+framework/runtime-library failures should be reported at the failing stage,
+not papered over by fake Driver success. `FAKE_CUDA_TRACE=1` and
+`FAKE_CUDA_TRACE_CALLS=1` can be passed to the runner for symbol and call logs.
+
+**Numerical inference is impossible with this driver**: device allocations are
+virtual addresses, no tensor bytes are stored or copied, and kernels do not
+execute. Passing any import, discovery, or startup stage is not evidence that
+model outputs or computations work.
