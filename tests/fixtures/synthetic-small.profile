@@ -1,0 +1,13 @@
+schema=1
+name=Synthetic smaller device
+source=synthetic
+memory_bytes=524288
+attribute.1=64
+attribute.2=64
+attribute.3=64
+attribute.4=16
+attribute.5=1024
+attribute.6=1024
+attribute.7=1024
+attribute.8=8192
+attribute.16=2

@@ -41,7 +41,20 @@ build/capture_device_profile /path/to/real/libcuda.so.1 0 > device.profile
 FAKE_CUDA_DEVICE_COUNT=4 FAKE_CUDA_PROFILE="$PWD/device.profile" your-command
 ```
 
-This file describes capabilities, not measured bandwidth, peer connectivity or runtime operating state. Those still need separate calibration; selecting four devices does not establish a measured four-GPU topology.
+For per-device profiles and measured direct peer access, use `FAKE_CUDA_SYSTEM=/absolute/path/devices.system` instead. It is mutually exclusive with `FAKE_CUDA_PROFILE` and `FAKE_CUDA_DEVICE_COUNT`. The device entries determine the count and must cover ordinals 0 through N−1; paths resolve relative to the manifest. Every directed non-self pair must be specified, including unavailable pairs. Missing pairs are rejected, not assumed connected.
+
+```text
+schema=1
+source=measured direct peer access
+device.0=device-0.profile
+device.1=device-1.profile
+peer.0.1=0
+peer.1.0=0
+```
+
+Capture `device-N.profile` for each ordinal using the command above, then run `build/capture_device_profile /path/to/real/libcuda.so.1 --system > devices.system` beside those files. `cuDeviceCanAccessPeer` and `cuCtxEnablePeerAccess` use this directed matrix; an unavailable direction returns `CUDA_ERROR_PEER_ACCESS_UNSUPPORTED` when enabled. [CUDA peer-access semantics](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__PEER__ACCESS.html).
+
+These files describe capabilities and direct peer access, not transport routes, measured bandwidth or runtime operating state. Peer-copy timing still uses the existing outgoing-queue heuristic, without modeling host staging or NUMA contention. Legacy configuration retains the synthetic all-to-all peer matrix for compatibility.
 
 Eager and captured kernels now retain the same immutable launch record: load identity and symbol, grid/block dimensions, dynamic shared memory, and an owned copy of an explicitly packed `extra` parameter buffer. Library kernels keep the same load identity through context-specific modules. Captured records survive temporary host argument storage and source graph destruction. [CUDA launch parameter conventions](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__EXEC.html).
 
@@ -74,7 +87,7 @@ The PyTorch probes run in Docker with no GPU devices and no network; `all` check
 
 These are conclusions from observed failures and targeted probes, not a claim of full CUDA compatibility:
 
-- **Measured peer availability:** All 12 directed peer-access queries on the four RTX 5060 Ti test host returned zero, despite four visible devices. The simulator still uses an all-to-all peer heuristic; capability profile injection does not configure physical topology. [Hardware evidence](results/2026-09-29/four-device-validation.md).
+- **Measured peer availability:** All 12 directed peer-access queries on the four RTX 5060 Ti test host returned zero, despite four visible devices. `FAKE_CUDA_SYSTEM` now preserves that matrix and each card's PCI/NUMA attributes. Legacy configuration and peer-copy timing retain their simulation heuristics. [Hardware evidence](results/2026-09-29/four-device-validation.md).
 
 - **Device configuration:** Multi-digit device counts previously fell back to one, and memory accounting used a fixed GH200 capacity. Strict count parsing and one profile-backed memory path now cover discovery, admission and free-memory queries. Contract tests cover 1/2/4/8/16/24/32/257 devices, unique ordinal UUIDs, independent accounting and malformed configuration. The original 148 GH200 attributes remain queryable even when the build headers end at a lower attribute number.
 

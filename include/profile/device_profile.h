@@ -4,6 +4,8 @@
 #include <cuda.h>
 #include <cstddef>
 #include <map>
+#include <memory>
+#include <vector>
 #include <string>
 
 namespace fake_cuda {
@@ -16,7 +18,12 @@ struct DeviceProfile {
 };
 struct DeviceConfiguration {
     int count = 1;
-    DeviceProfile profile;
+    std::vector<std::shared_ptr<const DeviceProfile>> profiles;
+    std::vector<bool> peer_access;
+    std::string topology_source = "synthetic all-to-all";
+    bool can_access(CUdevice source, CUdevice peer) const {
+        return peer_access[static_cast<size_t>(source) * count + peer];
+    }
     CUresult status = CUDA_SUCCESS;
 };
 const DeviceConfiguration &device_configuration();

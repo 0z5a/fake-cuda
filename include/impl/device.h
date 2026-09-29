@@ -16,7 +16,7 @@ class Context;
 class Device {
 public:
     explicit Device(CUdevice ordinal) noexcept
-        : ordinal_(ordinal), profile_(device_configuration().profile) {}
+        : ordinal_(ordinal), profile_(*device_configuration().profiles[ordinal]) {}
     const DeviceProfile &profile() const noexcept { return profile_; }
     static bool valid(CUdevice ordinal) noexcept;
     static int count() noexcept;

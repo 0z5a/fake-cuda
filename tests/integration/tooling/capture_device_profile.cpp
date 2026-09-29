@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string_view>
+#include <vector>
 
 template<class T> T symbol(void *driver, const char *name) {
     auto function = reinterpret_cast<T>(dlsym(driver, name));
@@ -15,16 +16,36 @@ template<class T> T symbol(void *driver, const char *name) {
     if (status != CUDA_SUCCESS) { std::fprintf(stderr, "%s: %d\n", #name, status); return 1; } \
 } while (0)
 int main(int argc, char **argv) {
-    if (argc != 3) { std::fprintf(stderr, "usage: %s /path/to/real/libcuda.so.1 ordinal\n", argv[0]); return 1; }
+    if (argc != 3) { std::fprintf(stderr, "usage: %s /path/to/real/libcuda.so.1 ordinal|--system\n", argv[0]); return 1; }
     const std::string_view argument(argv[2]);
+    const bool system = argument == "--system";
     int ordinal = -1;
-    auto [end, error] = std::from_chars(argument.data(), argument.data() + argument.size(), ordinal);
-    if (error != std::errc{} || end != argument.data() + argument.size() || ordinal < 0) return 1;
+    if (!system) {
+        auto [end, error] = std::from_chars(argument.data(), argument.data() + argument.size(), ordinal);
+        if (error != std::errc{} || end != argument.data() + argument.size() || ordinal < 0) return 1;
+    }
     void *driver = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (!driver) { std::fprintf(stderr, "%s\n", dlerror()); return 1; }
     CALL(cuInit, 0);
     int version; CUdevice device; CUuuid uuid; char name[256]; size_t memory;
     CALL(cuDriverGetVersion, &version);
+    if (system) {
+        int count = 0; CALL(cuDeviceGetCount, &count);
+        if (!count) return 1;
+        std::vector<CUdevice> devices(count);
+        std::printf("schema=1\nsource=Driver %d peer-access snapshot\n", version);
+        for (int i = 0; i < count; ++i) {
+            CALL(cuDeviceGet, &devices[i], i);
+            std::printf("device.%d=device-%d.profile\n", i, i);
+        }
+        for (int source = 0; source < count; ++source)
+            for (int peer = 0; peer < count; ++peer) if (source != peer) {
+                int access = 0; CALL(cuDeviceCanAccessPeer, &access, devices[source], devices[peer]);
+                std::printf("peer.%d.%d=%d\n", source, peer, access);
+            }
+        dlclose(driver);
+        return 0;
+    }
     CALL(cuDeviceGet, &device, ordinal);
     CALL(cuDeviceGetUuid_v2, &uuid, device);
     CALL(cuDeviceGetName, name, sizeof(name), device);

@@ -313,7 +313,7 @@ CUresult Registry::peer_enable(CUcontext peer, unsigned int flags) {
     auto current = selected_locked();
     auto other = live_locked(peer);
     if (!current || !other || current == other) return CUDA_ERROR_INVALID_CONTEXT;
-    if (current->device_ordinal() == other->device_ordinal())
+    if (!device_configuration().can_access(current->device_ordinal(), other->device_ordinal()))
         return CUDA_ERROR_PEER_ACCESS_UNSUPPORTED;
     try {
         auto& enabled = peers_[current->handle()];
@@ -452,7 +452,7 @@ CUresult core_can_access_peer(int *out, CUdevice device, CUdevice peer) {
     if (!out) return CUDA_ERROR_INVALID_VALUE;
     if (!fake_cuda::Device::valid(device) || !fake_cuda::Device::valid(peer))
         return CUDA_ERROR_INVALID_DEVICE;
-    *out = device != peer ? 1 : 0;
+    *out = fake_cuda::device_configuration().can_access(device, peer);
     return CUDA_SUCCESS;
 }
 CUresult core_primary_get(CUcontext *out, CUdevice device) { return registry.primary_get(out, device, false); }
