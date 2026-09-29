@@ -8,10 +8,12 @@ import torch
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--mode", choices=("real", "fake"), required=True)
 parser.add_argument("--kernel", choices=("copy", "add"), default="copy")
+parser.add_argument("--device", type=int, default=0)
 args = parser.parse_args()
 if args.mode == "fake":
     assert not list(Path("/dev").glob("nvidia*"))
 
+torch.cuda.set_device(args.device)
 a, b = torch.cuda.Stream(), torch.cuda.Stream()
 source = torch.empty(4096, device="cuda", dtype=torch.float32)
 target = torch.empty_like(source)
@@ -66,7 +68,7 @@ if args.mode == "real":
     for iteration, output in enumerate(saved):
         expected = (iteration + 1) * (2 if args.kernel == "add" else 1)
         torch.testing.assert_close(output, torch.full_like(output, expected), rtol=0, atol=0)
-print(json.dumps({"mode": args.mode, "torch": torch.__version__, "cuda": torch.version.cuda,
+print(json.dumps({"mode": args.mode, "device": args.device, "torch": torch.__version__, "cuda": torch.version.cuda,
                   "kernel": args.kernel,
                   "replays": 4, "cross_stream_capture": "PASS",
                   "numerical_checks": "PASS" if args.mode == "real" else "NOT_APPLICABLE",

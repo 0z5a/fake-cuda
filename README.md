@@ -47,6 +47,8 @@ Eager and captured kernels now retain the same immutable launch record: load ide
 
 Images remain opaque: `kernelParams` has an unknown layout and is never retained or dereferenced without an ABI. Static resources, parameter types, pointed-to allocation generations and content hashes are not decoded yet. Packed snapshots copy parameter bytes, not tensor data. Load IDs are process-local identities, not predictor cache keys. Kernel duration remains the 10 ms heuristic; this is the first profile/metadata slice, not calibrated execution prediction.
 
+A standalone real-Driver oracle, `build/driver_graph_contract /path/to/real/libcuda.so.1`, checks peer access, cross-stream capture, changed-input replay values and eager/graph timing on every visible GPU. It uses bounded pinned buffers and requires CUDA 13 Driver entry points. Four RTX 5060 Ti profiles and real/no-GPU checks are documented in the [hardware report](results/2026-09-29/four-device-validation.md).
+
 ## Build and try it
 
 On Linux aarch64, install `uv`, CMake, a C/C++ compiler, Python 3.12 and Docker with a local `ubuntu:24.04` image. The setup script installs separate PyTorch CUDA 12.8 and 13.0 environments (several GB of downloads); CUDA 13 headers from the latter are required to build.
@@ -71,6 +73,8 @@ The PyTorch probes run in Docker with no GPU devices and no network; `all` check
 ## Debugging findings
 
 These are conclusions from observed failures and targeted probes, not a claim of full CUDA compatibility:
+
+- **Measured peer availability:** All 12 directed peer-access queries on the four RTX 5060 Ti test host returned zero, despite four visible devices. The simulator still uses an all-to-all peer heuristic; capability profile injection does not configure physical topology. [Hardware evidence](results/2026-09-29/four-device-validation.md).
 
 - **Device configuration:** Multi-digit device counts previously fell back to one, and memory accounting used a fixed GH200 capacity. Strict count parsing and one profile-backed memory path now cover discovery, admission and free-memory queries. Contract tests cover 1/2/4/8/16/24/32/257 devices, unique ordinal UUIDs, independent accounting and malformed configuration. The original 148 GH200 attributes remain queryable even when the build headers end at a lower attribute number.
 
