@@ -60,7 +60,9 @@ if system is not None:
             result = driver.cuCtxEnablePeerAccess(contexts[peer], 0)
             assert result == (0 if expected else 217), (source, peer, result)
             if expected:
+                assert driver.cuCtxEnablePeerAccess(contexts[peer], 0) == 704
                 assert driver.cuCtxDisablePeerAccess(contexts[peer]) == 0
+            assert driver.cuCtxDisablePeerAccess(contexts[peer]) == 705
     for context in contexts:
         assert driver.cuCtxDestroy_v2(context) == 0
     print("PASS: complete directed peer matrix and context enable results")

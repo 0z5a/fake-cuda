@@ -54,12 +54,32 @@ int main(int argc, char **argv) {
     OK(cuInit, 0);
     int count = 0; OK(cuDeviceGetCount, &count);
     if (!count) return 1;
-    std::puts("| Source | Peer | Driver peer access |\n| ---: | ---: | ---: |");
-    for (int source = 0; source < count; ++source)
+    std::vector<CUcontext> contexts(count);
+    for (int ordinal = 0; ordinal < count; ++ordinal)
+        OK(cuCtxCreate_v4, &contexts[ordinal], nullptr, 0, ordinal);
+    std::puts("| Source | Peer | Driver peer access | Enable/disable contract |\n| ---: | ---: | ---: | --- |");
+    for (int source = 0; source < count; ++source) {
+        OK(cuCtxSetCurrent, contexts[source]);
         for (int peer = 0; peer < count; ++peer) if (source != peer) {
             int available = 0; OK(cuDeviceCanAccessPeer, &available, source, peer);
-            std::printf("| %d | %d | %d |\n", source, peer, available);
+            const CUresult enabled = API(cuCtxEnablePeerAccess, contexts[peer], 0);
+            const CUresult expected = available ? CUDA_SUCCESS : CUDA_ERROR_PEER_ACCESS_UNSUPPORTED;
+            if (enabled != expected) {
+                std::fprintf(stderr, "peer %d -> %d: enable returned %d, expected %d\n",
+                             source, peer, enabled, expected);
+                return 1;
+            }
+            if (available) {
+                if (API(cuCtxEnablePeerAccess, contexts[peer], 0) != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED)
+                    return 1;
+                OK(cuCtxDisablePeerAccess, contexts[peer]);
+            }
+            if (API(cuCtxDisablePeerAccess, contexts[peer]) != CUDA_ERROR_PEER_ACCESS_NOT_ENABLED)
+                return 1;
+            std::printf("| %d | %d | %d | PASS |\n", source, peer, available);
         }
+    }
+    for (CUcontext context : contexts) { OK(cuCtxDestroy_v2, context); }
     std::puts("\n| Device | Four changed-input replays | Eager µs | Graph µs | Speedup |\n"
               "| ---: | --- | ---: | ---: | ---: |");
     for (int ordinal = 0; ordinal < count; ++ordinal) {
