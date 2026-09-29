@@ -1,1 +1,0 @@
-{"mode": "real", "torch": "2.13.0+cu130", "cuda": "13.0", "kernel": "add", "replays": 4, "cross_stream_capture": "PASS", "numerical_checks": "PASS", "status": "PASS"}

@@ -37,6 +37,12 @@ the supported simulator subset; no device data is copied or computed.
 compatible command paths for the optional **real-GPU-only** scripts in `tooling/`.
 They must not be used as fake-driver numerical tests.
 
+## General graph validation
+
+`pytorch/graph_contract.py --mode real|fake --kernel copy|add` checks a cross-stream capture and four replays on alternating launch streams. Real mode additionally verifies updated inputs and saved output ownership. Fake mode requires the no-GPU container and checks only control flow.
+
+`tooling/benchmark_graph.py --operation copy|add` runs on real CUDA, validates values and changed-input replay, then prints an eager/Graph Markdown speed table. Its `benchmark_graph(run, reference, update_input, *, atol, rtol, repetitions=100)` function accepts typed callbacks for other operators. Adapters own their tensors and update input values in place; the runner owns warmup, capture, validation and alternating timing. Operator-specific dependencies and raw outputs stay outside the repository. See the [validation report](../../results/2026-09-29/README.md).
+
 ## Framework startup stages (not inference)
 
 Install vLLM and SGLang in **separate** uv venvs (see `AGENTS.md` for tested

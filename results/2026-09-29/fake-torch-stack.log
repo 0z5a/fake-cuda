@@ -1,8 +1,0 @@
-[W929 06:58:08.663664968 Module.cpp:206] symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1...
-
-Traceback (most recent call last):
-  File "/home/gongji/0z5a/work/fake-cuda-pcie-test/patched/tests/integration/pytorch/graph_contract.py", line 31, in <module>
-    graph.capture_begin()
-  File "/home/gongji/0z5a/lib/python3.12/site-packages/torch/cuda/graphs.py", line 153, in capture_begin
-    super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
-ValueError: stoi

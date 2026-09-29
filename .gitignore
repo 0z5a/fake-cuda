@@ -23,3 +23,8 @@ __pycache__/
 .vscode/
 .zed/
 .DS_Store
+
+# Raw test outputs stay local; commit Markdown reports instead
+/results/**/*.log
+/results/**/*.json
+/results/**/*.txt
