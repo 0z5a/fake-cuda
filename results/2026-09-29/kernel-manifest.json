@@ -1,0 +1,61 @@
+{
+  "sources": {
+    "flash-attention": "e9cf2c1651d2303191eb40a739a3c135fda00999",
+    "nunchaku": "302e0e97024ebd68688fe890e5df83731edf7b54"
+  },
+  "packages": {
+    "torch": "2.13.0+cu130",
+    "nvidia-cutlass-dsl": "4.6.2",
+    "quack-kernels": "0.6.4",
+    "apache-tvm-ffi": "0.1.11",
+    "torch-c-dlpack-ext": "0.1.5",
+    "einops": "0.8.2",
+    "ninja": "1.13.2",
+    "pybind11": "3.1.0"
+  },
+  "files": {
+    "patched/tests/integration/tooling/benchmark_marlin_graph.py": "bd89d43f34e6c8d8d2c55db72f7d79cf30df54313b14f653af2e665332e82110",
+    "patched/tests/integration/tooling/benchmark_fa4_graph.py": "f84d7c338fbd984becd75c7bcf7d2062ad331ee565eaf91ccb904fa0e2847b7a",
+    "patched/tests/integration/tooling/benchmark_svdquant_graph.py": "943f83ee62f94d4bccc52eeba4dcf1b1e45f8f5b359e6d34beb19efb093391ef",
+    "patched/tests/integration/tooling/prepare_kernel_namespaces.py": "860e38ea585523e772a0f37170cd2db32044d0e1b3f96bbf4085619719234137",
+    "patched/tests/integration/pytorch/fa4_control_flow.py": "138e0e31808acfe757628c3b6fa58714ed569e80298b1dceec3821c37a54f609",
+    "patched/tests/integration/pytorch/svdquant_control_flow.py": "8663b3f61e0caf9f9254f436a4e2cba3f7ae83291acaf264d3c7d982764024d8",
+    "kernels/flash-attention/flash_attn/cute/interface.py": "14b3e87d60494bfcef2fe46023e3318a024b4a27dfb3cd10ee78068df2bec176",
+    "kernels/flash-attention/flash_attn/cute/flash_fwd_sm120.py": "abd017add69914e46f0fcfc017ad51c3d07d79fd87d15f969036ddd82bcc7da2",
+    "kernels/nunchaku/nunchaku/csrc/pybind.cpp": "5312553278acb4b378503d76794aa22871989ebdbefea8fcfb3ad74cbcc0555b",
+    "kernels/nunchaku/src/kernels/zgemm/gemm_w4a4.cu": "766c178308c1d2b7a59bee8f71a5bd169e265b3dff8d1ba3f25cd324ce1b7666",
+    "patched/tests/integration/tooling/build_svdquant_binding.py": "78057bea4e0f16abe1372a3748b22ed9d93988c0d0d9ce1c88cdae37e68c6b29",
+    "kernels/nunchaku-kernel-binding/_C.so": "c341dd753891a4334a29b90f941c748387c317f2ddf3e8020397302a11f91121",
+    "kernels/nunchaku-kernel-binding/binding.cpp": "de35e1cede15583863a895c83d92289362f61d6b7216376678f93b93d71251ed",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/Module.o": "26ff0625f1d43b4b6311696d8c55b82631b6a8fc71b2e043b55d1d0588bcd219",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/layernorm.o": "0a0c8680cd62061753e84123c285fc14691f9271c4702374e50c6687e9b5aa3d",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/Linear.o": "c6142b0a5d2178d002b189f6f45c4e77abda923d76f87a0089c92ed4daeb0f1f",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/activation.o": "a218afc4ce3e98c7f2e3189eeb9d58d4e751fd541c390844d2fb9e1621e149be",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/Serialization.o": "2265d0141061c260773205e922fa8948760601bbffe9359ed08302064a69437d",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/interop/torch.o": "10e0f779a3ed3828b8e39770ab7cf3b252810b524d9a7ba4275fe700abfd24d5",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/misc_kernels.o": "1ff709d49d87a737ce4935c18c56250dfda32c21e0cee9d3ee2fb95feddc08f9",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/gemm_f16.o": "52e03549aac95ac8e419baa53887385e2ce82504a4a67f760e043b01a3b80425",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/layernorm_kernels.o": "54d077265cfff95930a319fc6765f04910198172a9c9ed2d0b2b0da278d204aa",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/dwconv.o": "6d0cf1a1e03d6987799b600e3e761c5d33086848a939d39bfcc37b872dce75f3",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/activation_kernels.o": "6d40b120ea1d01112cb75ec92de7d9b181584ee5b69842a6e0804e7845687740",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/gemm_batched.o": "9647e160e473bce47e0b0497c33f410adfe47d558dc16a734848f78173cd8ca4",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4_launch_fp16_int4_fasteri2f.o": "b73f89a86385391999f7837b10c9657994a0ed39978b330732231e41aa89e2ef",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4_launch_fp16_int4.o": "174fd83fc4044d859d440d49285a2cbb59a82833364f973808137e4120924a2b",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4_launch_bf16_fp4.o": "4a66990d9bc88725694b5ebd8c939f535cc468135088fa2cca67b93a4ca3fab0",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/attention.o": "2c5715bd3cdb36a22192b84583eece329257dedc8bde0b31ec0328230c6bd5bb",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4_launch_fp16_fp4.o": "97a13bc6f98bb48f146bd54db45d992d2f0a8a2bb6e061171ab14142b5d32afa",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4_test.o": "63cb28e2d7c671281003c5d0610918eec374cf1c0708dfa8bd6434c4096bf6e4",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4.o": "a9403cb5ea30078a5a38a934f27a61bf91571dba70a9969e2ac5f4be37560e51",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w4a4_launch_bf16_int4.o": "b63fe3af0545f160859f979aa1568b893264b236fd0a96bc6197080960d24596",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/zgemm/gemm_w8a8.o": "aa062a2f9861946a059c9634791df84a04800a487b786601e38ed7c3f6679622",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/awq/gemv_awq.o": "2996dba5faf9da86a3200a428f426ab9a43a3b574b182236a1d03cdd7aa52430",
+    "kernels/nunchaku/build/temp.linux-x86_64-cpython-312/src/kernels/awq/gemm_awq.o": "16fbb9bb5e38bbb558aaf865735273491cda895077b5781ee7654f2ad809f3aa"
+  },
+  "nunchaku_submodules": {
+    "cutlass": "a75b4ac483166189a45290783cb0a18af5ff0ea5",
+    "json": "63258397761b3dd96dd171e5a5ad5aa915834c35",
+    "mio": "8b6b7d878c89e81614d05edca7936de41ccdd2da",
+    "spdlog": "27cb4c76708608465c413f6d0e6b8d99a4d84302",
+    "Block-Sparse-Attention": "99511c34554a13ffaa81321834faf66389ffcb30"
+  }
+}

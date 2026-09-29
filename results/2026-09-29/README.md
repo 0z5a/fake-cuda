@@ -1,4 +1,4 @@
-# Graph contracts and Marlin integration — RTX 5090
+# Graph contracts and kernel integration — RTX 5090
 
 Baseline: `monsoon235/fake-cuda@75fd2cd27713373baef17007547a5dda03219223`.
 Changes live on `pcie-test`. This report covers graph control flow and a real-kernel benchmark; numerical kernel execution remains outside the simulator.
@@ -44,7 +44,10 @@ Raw records: `marlin-real.json`, `marlin-real-2.json`, `marlin-real-3.json`. Eac
 | PyTorch vector-add binary through FakeCUDA capture/replay | PASS for control flow; values are not computed |
 | Marlin on real CUDA | Correctness and eager/Graph timing PASS for the three shapes above |
 | Installed Marlin binary through FakeCUDA | BLOCKED at extension load: unresolved `cuTensorMapEncodeTiled`; see `fake-marlin.log` |
-| FA4 / SVDQuant | NOT RUN: `flash_attn` / `nunchaku` absent from the selected environment; no dependency installation performed |
+| FA4 on real CUDA | Correctness and eager/Graph timing PASS from task-local official source; [follow-up report](FA4-SVDQuant.md) |
+| SVDQuant W4A4 + rank-32 on real CUDA | Correctness and changed-input Graph replay PASS via official core objects/test binding; shared-GPU timing is variable; [all runs](FA4-SVDQuant.md) |
+| SVDQuant through FakeCUDA | BLOCKED at dynamic shared-memory attribute setup before capture; `svdquant-binding-fake.log` |
+| FA4 through FakeCUDA | BLOCKED during CuTe/TVM library initialization after unresolved `cuKernelGetAttribute`; no capture reached |
 | YuE2 / BAGEL / MiniCPM full-model execution | NOT RUN in FakeCUDA; numerical execution is deferred, and old real-model results are not simulator evidence |
 | Kernel argument layout/values, parameter updates, allocation reuse generations, calibrated durations | Not added by this patch; existing 10 ms virtual kernel duration remains uncalibrated |
 

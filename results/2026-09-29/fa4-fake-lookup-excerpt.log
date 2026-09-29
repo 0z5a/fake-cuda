@@ -1,0 +1,31 @@
+fake-cuda: call cuDeviceGetAttribute => 0
+fake-cuda: call cuDeviceGetAttribute => 0
+fake-cuda: call cuDeviceGetAttribute => 0
+fake-cuda: private table tools-tls
+fake-cuda: private table context-local-storage
+fake-cuda: private table context-checks
+fake-cuda: private table integrity
+fake-cuda: call cuLibraryLoadData => 0
+fake-cuda: call cuDeviceGetAttribute => 0
+fake-cuda: call cuLibraryGetKernel => 0
+fake-cuda: resolve cuKernelGetAttribute: no
+fake-cuda: call cuCtxGetDevice => 0
+Traceback (most recent call last):
+  File "/home/gongji/0z5a/work/fake-cuda-pcie-test/kernels/fa4-control-flow.py", line 10, in <module>
+    flash_attn_func(q, k, v)
+  File "/home/gongji/0z5a/work/fake-cuda-pcie-test/kernels/fa4/flash_attn/cute/interface.py", line 3828, in flash_attn_func
+    return FlashAttnFunc.apply(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/gongji/0z5a/lib/python3.12/site-packages/torch/autograd/function.py", line 625, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/gongji/0z5a/work/fake-cuda-pcie-test/kernels/fa4/flash_attn/cute/interface.py", line 3457, in forward
+    out, lse, p, row_max, o_lo = _flash_attn_fwd(
+                                 ^^^^^^^^^^^^^^^^
+  File "/home/gongji/0z5a/work/fake-cuda-pcie-test/kernels/fa4/flash_attn/cute/interface.py", line 1651, in _flash_attn_fwd
+    _flash_attn_fwd.compile_cache[compile_key](*call_args)
+  File "<string>", line 3, in wrapper
+  File "python/tvm_ffi/cython/function.pxi", line 968, in tvm_ffi.core.Function.__call__
+  File "<unknown>", line 0, in cuda_dialect_init_library_once
+RuntimeError: Got Cuda Runtime Error: cudaErrorUnknown unknown error
+fake-cuda: call cuDevicePrimaryCtxRelease_v2 => 0

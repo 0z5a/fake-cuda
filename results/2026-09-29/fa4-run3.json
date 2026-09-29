@@ -1,0 +1,396 @@
+{
+  "scope": "real FA4 forward; not full-model E2E or simulator prediction",
+  "torch": "2.13.0+cu130",
+  "cuda": "13.0",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "repetitions": 100,
+  "results": [
+    {
+      "length": 512,
+      "causal": false,
+      "heads": 8,
+      "head_dim": 64,
+      "correctness": "PASS",
+      "max_abs_errors": [
+        0.00013720989227294922,
+        9.28640365600586e-05,
+        0.00015923380851745605
+      ],
+      "eager_wall_us": 66.11117481952533,
+      "graph_wall_us": 16.59266505157575,
+      "speedup": 3.984361440071797,
+      "arms": [
+        {
+          "block": 0,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 66.33247947320342,
+          "device_us": 65.81984043121338
+        },
+        {
+          "block": 0,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 16.632290207780898,
+          "device_us": 16.436480283737183
+        },
+        {
+          "block": 0,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 16.570299630984664,
+          "device_us": 16.418559551239014
+        },
+        {
+          "block": 0,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 66.4895900990814,
+          "device_us": 66.29248142242432
+        },
+        {
+          "block": 1,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 16.64778043050319,
+          "device_us": 16.427520513534546
+        },
+        {
+          "block": 1,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 65.44266012497246,
+          "device_us": 65.2400016784668
+        },
+        {
+          "block": 1,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 71.95182959549129,
+          "device_us": 71.74848079681396
+        },
+        {
+          "block": 1,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 16.604270203970373,
+          "device_us": 16.424319744110107
+        },
+        {
+          "block": 2,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 66.49743998423219,
+          "device_us": 66.30239963531494
+        },
+        {
+          "block": 2,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 16.59283007029444,
+          "device_us": 16.42400026321411
+        },
+        {
+          "block": 2,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 16.566019621677697,
+          "device_us": 16.420480012893677
+        },
+        {
+          "block": 2,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 65.88987016584724,
+          "device_us": 65.69439888000488
+        },
+        {
+          "block": 3,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 16.59250003285706,
+          "device_us": 16.42207980155945
+        },
+        {
+          "block": 3,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 65.06832025479525,
+          "device_us": 64.89215850830078
+        },
+        {
+          "block": 3,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 64.82909026090056,
+          "device_us": 64.65439796447754
+        },
+        {
+          "block": 3,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 16.58890047110617,
+          "device_us": 16.416959762573242
+        }
+      ]
+    },
+    {
+      "length": 2048,
+      "causal": false,
+      "heads": 8,
+      "head_dim": 64,
+      "correctness": "PASS",
+      "max_abs_errors": [
+        0.00010654330253601074,
+        4.673004150390625e-05,
+        0.0001232922077178955
+      ],
+      "eager_wall_us": 65.69684512214735,
+      "graph_wall_us": 53.506550029851496,
+      "speedup": 1.2278280899346874,
+      "arms": [
+        {
+          "block": 0,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 65.6364404130727,
+          "device_us": 65.3327989578247
+        },
+        {
+          "block": 0,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 53.51505009457469,
+          "device_us": 53.34144115447998
+        },
+        {
+          "block": 0,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 53.50460996851325,
+          "device_us": 53.33727836608887
+        },
+        {
+          "block": 0,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 66.51778006926179,
+          "device_us": 66.32544040679932
+        },
+        {
+          "block": 1,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 53.50849009118974,
+          "device_us": 53.343682289123535
+        },
+        {
+          "block": 1,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 65.90545002836734,
+          "device_us": 65.7212781906128
+        },
+        {
+          "block": 1,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 65.98096981178969,
+          "device_us": 65.80351829528809
+        },
+        {
+          "block": 1,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 53.501949878409505,
+          "device_us": 53.33727836608887
+        },
+        {
+          "block": 2,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 65.59070956427604,
+          "device_us": 65.40703773498535
+        },
+        {
+          "block": 2,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 53.50961000658572,
+          "device_us": 53.335041999816895
+        },
+        {
+          "block": 2,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 53.460909985005856,
+          "device_us": 53.31264019012451
+        },
+        {
+          "block": 2,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 65.75110019184649,
+          "device_us": 65.55967807769775
+        },
+        {
+          "block": 3,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 53.52255015168339,
+          "device_us": 53.35872173309326
+        },
+        {
+          "block": 3,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 65.64259005244821,
+          "device_us": 65.44991970062256
+        },
+        {
+          "block": 3,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 65.4885295080021,
+          "device_us": 65.3113603591919
+        },
+        {
+          "block": 3,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 53.47480997443199,
+          "device_us": 53.332481384277344
+        }
+      ]
+    },
+    {
+      "length": 2048,
+      "causal": true,
+      "heads": 8,
+      "head_dim": 64,
+      "correctness": "PASS",
+      "max_abs_errors": [
+        0.001009225845336914,
+        0.0010001659393310547,
+        0.000982522964477539
+      ],
+      "eager_wall_us": 67.13957991451025,
+      "graph_wall_us": 57.86485999124125,
+      "speedup": 1.160282422262369,
+      "arms": [
+        {
+          "block": 0,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 68.85333976242691,
+          "device_us": 68.47871780395508
+        },
+        {
+          "block": 0,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 58.149960241280496,
+          "device_us": 57.93568134307861
+        },
+        {
+          "block": 0,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 57.84027045592666,
+          "device_us": 57.66240119934082
+        },
+        {
+          "block": 0,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 67.94458953663707,
+          "device_us": 67.74784088134766
+        },
+        {
+          "block": 1,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 57.98250960651785,
+          "device_us": 57.765440940856934
+        },
+        {
+          "block": 1,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 67.26310995873064,
+          "device_us": 67.07168102264404
+        },
+        {
+          "block": 1,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 67.04572995658964,
+          "device_us": 66.8617582321167
+        },
+        {
+          "block": 1,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 57.881600223481655,
+          "device_us": 57.70912170410156
+        },
+        {
+          "block": 2,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 67.03623977955431,
+          "device_us": 66.81087970733643
+        },
+        {
+          "block": 2,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 57.84811975900084,
+          "device_us": 57.655038833618164
+        },
+        {
+          "block": 2,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 57.75508005172014,
+          "device_us": 57.59456157684326
+        },
+        {
+          "block": 2,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 67.23342987243086,
+          "device_us": 67.04639911651611
+        },
+        {
+          "block": 3,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 57.664980413392186,
+          "device_us": 57.49375820159912
+        },
+        {
+          "block": 3,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 66.80983991827816,
+          "device_us": 66.59711837768555
+        },
+        {
+          "block": 3,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 66.1743397358805,
+          "device_us": 65.97184181213379
+        },
+        {
+          "block": 3,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 57.895060162991285,
+          "device_us": 57.721920013427734
+        }
+      ]
+    }
+  ]
+}

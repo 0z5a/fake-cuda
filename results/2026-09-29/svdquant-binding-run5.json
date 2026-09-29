@@ -1,0 +1,403 @@
+{
+  "scope": "real SVDQuant INT4 linear pipeline including fused low-rank branch; not model E2E",
+  "torch": "2.13.0+cu130",
+  "cuda": "13.0",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "extension_sha256": "c341dd753891a4334a29b90f941c748387c317f2ddf3e8020397302a11f91121",
+  "repetitions": 100,
+  "results": [
+    {
+      "m": 256,
+      "k": 1024,
+      "n": 2048,
+      "rank": 32,
+      "group_size": 64,
+      "correctness": "PASS",
+      "max_abs_errors": [
+        0.014670372009277344,
+        0.007335186004638672,
+        0.014670372009277344
+      ],
+      "lowrank_max_abs": 0.5165218710899353,
+      "eager_wall_us": 134.96934028808028,
+      "graph_wall_us": 131.35573506588116,
+      "speedup": 1.027510068139672,
+      "arms": [
+        {
+          "block": 0,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 135.68289985414594,
+          "device_us": 135.25823593139648
+        },
+        {
+          "block": 0,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 131.37792993802577,
+          "device_us": 131.1622428894043
+        },
+        {
+          "block": 0,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 131.2924805097282,
+          "device_us": 131.1184024810791
+        },
+        {
+          "block": 0,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 134.909640182741,
+          "device_us": 134.7100830078125
+        },
+        {
+          "block": 1,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 131.32732012309134,
+          "device_us": 131.13056182861328
+        },
+        {
+          "block": 1,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 134.88322030752897,
+          "device_us": 134.64032173156738
+        },
+        {
+          "block": 1,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 134.9869603291154,
+          "device_us": 134.7555160522461
+        },
+        {
+          "block": 1,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 131.46571000106633,
+          "device_us": 131.20960235595703
+        },
+        {
+          "block": 2,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 134.86743962857872,
+          "device_us": 134.617919921875
+        },
+        {
+          "block": 2,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 131.32131018210202,
+          "device_us": 131.11552238464355
+        },
+        {
+          "block": 2,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 131.3672703690827,
+          "device_us": 131.18783950805664
+        },
+        {
+          "block": 2,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 134.95172024704516,
+          "device_us": 134.73247528076172
+        },
+        {
+          "block": 3,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 131.34419976267964,
+          "device_us": 131.1398410797119
+        },
+        {
+          "block": 3,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 136.64471975062042,
+          "device_us": 136.13408088684082
+        },
+        {
+          "block": 3,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 135.1391599746421,
+          "device_us": 134.81056213378906
+        },
+        {
+          "block": 3,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 131.47198013029993,
+          "device_us": 131.18847846984863
+        }
+      ]
+    },
+    {
+      "m": 1024,
+      "k": 1024,
+      "n": 2048,
+      "rank": 32,
+      "group_size": 64,
+      "correctness": "PASS",
+      "max_abs_errors": [
+        0.01652050018310547,
+        0.008260250091552734,
+        0.01652050018310547
+      ],
+      "lowrank_max_abs": 0.5447642207145691,
+      "eager_wall_us": 135.46711503295228,
+      "graph_wall_us": 131.41366507625207,
+      "speedup": 1.0308449654329952,
+      "arms": [
+        {
+          "block": 0,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 135.64951019361615,
+          "device_us": 135.33856391906738
+        },
+        {
+          "block": 0,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 131.48040045052767,
+          "device_us": 131.26336097717285
+        },
+        {
+          "block": 0,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 131.41088013071567,
+          "device_us": 131.212797164917
+        },
+        {
+          "block": 0,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 135.5193799827248,
+          "device_us": 135.27615547180176
+        },
+        {
+          "block": 1,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 131.46981014870107,
+          "device_us": 131.24064445495605
+        },
+        {
+          "block": 1,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 135.4513195110485,
+          "device_us": 135.23903846740723
+        },
+        {
+          "block": 1,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 135.51445968914777,
+          "device_us": 135.27008056640625
+        },
+        {
+          "block": 1,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 131.4365497091785,
+          "device_us": 131.2275218963623
+        },
+        {
+          "block": 2,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 135.45806985348463,
+          "device_us": 135.23263931274414
+        },
+        {
+          "block": 2,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 131.4099197043106,
+          "device_us": 131.211519241333
+        },
+        {
+          "block": 2,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 131.4067404018715,
+          "device_us": 131.23295783996582
+        },
+        {
+          "block": 2,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 135.38623985368758,
+          "device_us": 135.18336296081543
+        },
+        {
+          "block": 3,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 131.41645002178848,
+          "device_us": 131.21248245239258
+        },
+        {
+          "block": 3,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 135.44470013584942,
+          "device_us": 135.24415969848633
+        },
+        {
+          "block": 3,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 135.47616021241993,
+          "device_us": 135.29151916503906
+        },
+        {
+          "block": 3,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 131.39638991560787,
+          "device_us": 131.21376037597656
+        }
+      ]
+    },
+    {
+      "m": 4096,
+      "k": 1024,
+      "n": 2048,
+      "rank": 32,
+      "group_size": 64,
+      "correctness": "PASS",
+      "max_abs_errors": [
+        0.02110576629638672,
+        0.01055288314819336,
+        0.02110576629638672
+      ],
+      "lowrank_max_abs": 0.5153210163116455,
+      "eager_wall_us": 262.9332401556894,
+      "graph_wall_us": 260.49032516311854,
+      "speedup": 1.009378140977179,
+      "arms": [
+        {
+          "block": 0,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 262.9301301203668,
+          "device_us": 262.5788879394531
+        },
+        {
+          "block": 0,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 260.49728970974684,
+          "device_us": 260.29504776000977
+        },
+        {
+          "block": 0,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 260.39039017632604,
+          "device_us": 260.22239685058594
+        },
+        {
+          "block": 0,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 262.92298978660256,
+          "device_us": 262.73120880126953
+        },
+        {
+          "block": 1,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 260.4413899825886,
+          "device_us": 260.26079177856445
+        },
+        {
+          "block": 1,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 262.8837403608486,
+          "device_us": 262.69983291625977
+        },
+        {
+          "block": 1,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 262.936350191012,
+          "device_us": 262.73536682128906
+        },
+        {
+          "block": 1,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 260.4908001376316,
+          "device_us": 260.263671875
+        },
+        {
+          "block": 2,
+          "position": 0,
+          "arm": "A",
+          "wall_us": 263.0890399450436,
+          "device_us": 262.8390312194824
+        },
+        {
+          "block": 2,
+          "position": 1,
+          "arm": "P",
+          "wall_us": 260.5085098184645,
+          "device_us": 260.2684783935547
+        },
+        {
+          "block": 2,
+          "position": 2,
+          "arm": "P",
+          "wall_us": 260.44234982691705,
+          "device_us": 260.2521514892578
+        },
+        {
+          "block": 2,
+          "position": 3,
+          "arm": "A",
+          "wall_us": 263.02390033379197,
+          "device_us": 262.79808044433594
+        },
+        {
+          "block": 3,
+          "position": 0,
+          "arm": "P",
+          "wall_us": 260.4898501886055,
+          "device_us": 260.2783966064453
+        },
+        {
+          "block": 3,
+          "position": 1,
+          "arm": "A",
+          "wall_us": 262.92925991583616,
+          "device_us": 262.70015716552734
+        },
+        {
+          "block": 3,
+          "position": 2,
+          "arm": "A",
+          "wall_us": 262.97589007299393,
+          "device_us": 262.76960372924805
+        },
+        {
+          "block": 3,
+          "position": 3,
+          "arm": "P",
+          "wall_us": 260.53197972942144,
+          "device_us": 260.3228759765625
+        }
+      ]
+    }
+  ]
+}
