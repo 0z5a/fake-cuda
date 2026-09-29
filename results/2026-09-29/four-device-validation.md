@@ -11,9 +11,9 @@ Hardware: 4 × NVIDIA GeForce RTX 5060 Ti 16GB, driver 580.126.09, CUDA 13.0 hea
 | 1 ↔ 2 | PHB | 0 |
 | 0/1/2 ↔ 3 | SYS, across NUMA nodes | 0 |
 
-All 12 directed `cuDeviceCanAccessPeer` queries returned zero; `nvidia-smi topo -p2p r/w` reported CNS. This checks direct peer access, not the behavior or throughput of host-staged copies. FakeCUDA still simulates all-to-all peer availability; loading a capability profile does **not** import this physical topology.
+All 12 directed `cuDeviceCanAccessPeer` queries returned zero; `nvidia-smi topo -p2p r/w` reported CNS. This checks direct peer access, not the behavior or throughput of host-staged copies. At `98ed658`, FakeCUDA simulated all-to-all peer availability. The subsequent [system configuration change](device-system.md) imports the direct-access matrix; transfer routes and bandwidth remain separate work.
 
-The four captured profiles contain 147 attributes each. Their differences are source identity, PCI bus ID, multi-GPU board group ID and host NUMA ID. Each profile was injected separately into a four-device FakeCUDA process on the original `0z5a` environment, inside an offline no-GPU container. All advertised attributes, names and memory capacities matched, and virtual UUIDs remained distinct. A single selected profile is replicated across virtual devices; mixed per-device profiles are not implemented.
+The four captured profiles contain 147 attributes each. Their differences are source identity, PCI bus ID, multi-GPU board group ID and host NUMA ID. Each profile was injected separately into a four-device FakeCUDA process on the original `0z5a` environment, inside an offline no-GPU container. All advertised attributes, names and memory capacities matched, and virtual UUIDs remained distinct. This run selected one profile at a time. The subsequent system configuration change validates all four profiles together in their original device slots.
 
 ## Graph correctness and speed
 
