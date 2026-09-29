@@ -1,5 +1,6 @@
 #include "impl/graph.h"
 #include "impl/capture.h"
+#include "impl/core.h"
 #include "impl/device.h"
 #include "impl/scheduler.h"
 #include "impl/virtual_work.h"
@@ -9,20 +10,23 @@
 #include <utility>
 
 namespace fake_cuda::detail {
+thread_local CUstreamCaptureMode thread_capture_mode = CU_STREAM_CAPTURE_MODE_GLOBAL;
 Graph::Graph(CUcontext context, std::vector<GraphNode> nodes, size_t lanes) noexcept
     : context_(context), nodes_(std::move(nodes)), lanes_(lanes) {}
 
 CUresult Graph::supports(unsigned long long flags) const noexcept {
-    // Captured graphs contain no allocation/free nodes. Per-node priorities
-    // are vacuous only when there are no kernel nodes.
+    // Default-priority nodes need no priority arbitration. Nonzero captured
+    // kernel priorities require a scheduling policy this model does not provide.
     if ((flags & CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY) &&
         std::any_of(nodes_.begin(), nodes_.end(),
-                    [](const GraphNode &entry) { return entry.node.kind == Kind::kernel; }))
+                    [](const GraphNode &entry) {
+                        return entry.node.kind == Kind::kernel && entry.node.priority != 0;
+                    }))
         return CUDA_ERROR_NOT_SUPPORTED;
     return CUDA_SUCCESS;
 }
 
-CUresult Graph::launch(Scheduler &s, Key key) const {
+CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
     const CUcontext ctx = key.context;
     // Preflight all handles and bounds before committing any work. Temporal
     // validity is checked at each node's dependency-adjusted start.
@@ -36,15 +40,14 @@ CUresult Graph::launch(Scheduler &s, Key key) const {
             return CUDA_ERROR_INVALID_VALUE;
     }
     std::vector<Key> lanes(lanes_);
-    lanes[0] = key;
-    for (size_t i = 1; i < lanes_; ++i)
+    for (size_t i = 0; i < lanes_; ++i)
         lanes[i] = {ctx, reinterpret_cast<CUstream>(std::numeric_limits<std::uintptr_t>::max() - s.new_handle()), 0, false};
 
     // Use a private copy of the resource timelines for preflight so a failed
     // replay does not submit any work. Event waits can delay async allocation use.
     Time launch_time = VirtualClock::now();
     std::vector<Time> predicted(nodes_.size());
-    std::vector<Time> lane_end(lanes_, s.queue.earliest(key, Kind::marker, {}, launch_time));
+    std::vector<Time> lane_end(lanes_, s.queue.earliest(key, Kind::marker, completion, launch_time));
     auto *device = fake_cuda::virtual_core_device(s.queue.device_for(ctx));
     Time h2d_available = device->h2d_queue.available_at();
     Time d2h_available = device->d2h_queue.available_at();
@@ -78,7 +81,9 @@ CUresult Graph::launch(Scheduler &s, Key key) const {
     }
     std::vector<OpPtr> replay;
     replay.reserve(nodes_.size());
-    s.queue.schedule(key, Kind::marker, 0, {}, launch_time);
+    const OpPtr entry = s.queue.schedule(key, Kind::marker, 0, completion, launch_time);
+    for (Key lane : lanes) s.queue.schedule(lane, Kind::marker, 0, entry, launch_time);
+    std::vector<OpPtr> exits(lanes_, entry);
     for (const GraphNode &entry : nodes_) {
         const Node &node = entry.node;
         OpPtr dependency;
@@ -87,11 +92,13 @@ CUresult Graph::launch(Scheduler &s, Key key) const {
         Key lane = lanes[entry.lane];
         OpPtr op = s.queue.schedule(lane, node.kind, node.bytes, dependency, launch_time);
         if (node.kind == Kind::record) s.events.at(node.event).record = op;
+        exits[entry.lane] = op;
         replay.push_back(std::move(op));
     }
-    // End-capture proved every side lane flows into the origin lane.
-    s.queue.schedule(key, Kind::marker, 0, {}, launch_time);
-    for (size_t i = 1; i < lanes.size(); ++i) s.queue.retire_stream(lanes[i]);
+    // Join all nodes without importing legacy/default-stream barriers into the DAG.
+    for (const OpPtr &exit : exits)
+        completion = s.queue.schedule(key, Kind::marker, 0, exit, launch_time);
+    for (Key lane : lanes) s.queue.retire_stream(lane);
     return CUDA_SUCCESS;
 }
 
@@ -106,23 +113,61 @@ CUresult GraphManager::append(Key key, Node node, CUcontext event_context,
                               CUgraphNode handle, bool &captured) {
     captured = false;
     if (auto capture = captures_.find(key.context); capture != captures_.end()) {
+        if (capture->second->contains(key) && capture->second->invalidated())
+            return CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
         if (node.kind == Kind::wait && event_context != key.context && capture->second->contains(key))
             return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
         captured = capture->second->append(key, node, handle);
     }
     return CUDA_SUCCESS;
 }
-CUresult GraphManager::begin_capture(Scheduler &s, Key key) {
+CUresult GraphManager::begin_capture(Scheduler &s, Key key, CUstreamCaptureMode mode) {
     if (captures_.contains(key.context))
         return capturing(key) ? CUDA_ERROR_STREAM_CAPTURE_UNMATCHED : CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
-    captures_.emplace(key.context, std::make_unique<Capture>(key, s.opaque<CUgraph>()));
+    captures_.emplace(key.context, std::make_unique<Capture>(key, s.opaque<CUgraph>(), mode));
     return CUDA_SUCCESS;
+}
+CUresult GraphManager::invalidate(Key key) {
+    auto it = captures_.find(key.context);
+    if (it == captures_.end() || !it->second->contains(key)) return CUDA_SUCCESS;
+    it->second->invalidate();
+    return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+}
+CUresult GraphManager::invalidate_context(CUcontext ctx) {
+    auto it = captures_.find(ctx);
+    if (it == captures_.end()) return CUDA_SUCCESS;
+    it->second->invalidate();
+    return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+}
+CUresult GraphManager::check_unsafe_call() {
+    if (thread_capture_mode == CU_STREAM_CAPTURE_MODE_RELAXED) return CUDA_SUCCESS;
+    bool prohibited = false;
+    for (auto &[context, capture] : captures_) {
+        if (capture->mode() == CU_STREAM_CAPTURE_MODE_RELAXED) continue;
+        if (capture->owned_by_thread() ||
+            (thread_capture_mode == CU_STREAM_CAPTURE_MODE_GLOBAL &&
+             capture->mode() == CU_STREAM_CAPTURE_MODE_GLOBAL)) {
+            capture->invalidate();
+            prohibited = true;
+        }
+    }
+    return prohibited ? CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED : CUDA_SUCCESS;
 }
 CUresult GraphManager::end_capture(Key key, CUgraph *graph) {
     auto it = captures_.find(key.context);
-    if (it == captures_.end() || !it->second->matches_origin(key))
-        return CUDA_ERROR_STREAM_CAPTURE_UNMATCHED;
+    if (it == captures_.end() || !it->second->contains(key)) return CUDA_ERROR_ILLEGAL_STATE;
+    if (!it->second->matches_origin(key)) return CUDA_ERROR_STREAM_CAPTURE_UNMATCHED;
     Capture &session = *it->second;
+    if (session.mode() != CU_STREAM_CAPTURE_MODE_RELAXED && !session.owned_by_thread()) {
+        captures_.erase(it);
+        *graph = nullptr;
+        return CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
+    }
+    if (session.invalidated()) {
+        captures_.erase(it);
+        *graph = nullptr;
+        return CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+    }
     if (!session.joined()) {
         captures_.erase(it);
         *graph = nullptr;
@@ -139,7 +184,8 @@ void GraphManager::capture_info(Key key, CUstreamCaptureStatus *status, cuuint64
                                 const CUgraphEdgeData **edges, size_t *count) const {
     auto it = captures_.find(key.context);
     const Capture *session = it != captures_.end() && it->second->contains(key) ? it->second.get() : nullptr;
-    *status = session ? CU_STREAM_CAPTURE_STATUS_ACTIVE : CU_STREAM_CAPTURE_STATUS_NONE;
+    *status = !session ? CU_STREAM_CAPTURE_STATUS_NONE : session->invalidated() ?
+        CU_STREAM_CAPTURE_STATUS_INVALIDATED : CU_STREAM_CAPTURE_STATUS_ACTIVE;
     if (id) *id = session ? reinterpret_cast<std::uintptr_t>(session->graph()) : 0;
     if (graph) *graph = session ? session->graph() : nullptr;
     const CUgraphNode *dependency = session ? session->dependency(key) : nullptr;
@@ -169,15 +215,15 @@ CUresult GraphManager::instantiate(Scheduler &s, CUcontext ctx, CUgraph graph,
     if (it == graphs_.end() || it->second->context() != ctx) return CUDA_ERROR_INVALID_HANDLE;
     if (CUresult result = it->second->supports(flags); result != CUDA_SUCCESS) return result;
     CUgraphExec handle = s.opaque<CUgraphExec>();
-    executables_.emplace(handle, it->second);
+    executables_.emplace(handle, Executable{it->second, {}});
     *exec = handle;
     return CUDA_SUCCESS;
 }
-CUresult GraphManager::launch(Scheduler &s, CUgraphExec exec, Key key) const {
+CUresult GraphManager::launch(Scheduler &s, CUgraphExec exec, Key key) {
     auto it = executables_.find(exec);
-    if (it == executables_.end() || it->second->context() != key.context) return CUDA_ERROR_INVALID_HANDLE;
+    if (it == executables_.end() || it->second.graph->context() != key.context) return CUDA_ERROR_INVALID_HANDLE;
     if (capturing(key)) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
-    return it->second->launch(s, key);
+    return it->second.graph->launch(s, key, it->second.completion);
 }
 CUresult GraphManager::destroy(CUcontext ctx, CUgraph graph) {
     auto it = graphs_.find(graph);
@@ -187,7 +233,7 @@ CUresult GraphManager::destroy(CUcontext ctx, CUgraph graph) {
 }
 CUresult GraphManager::destroy_exec(CUcontext ctx, CUgraphExec exec) {
     auto it = executables_.find(exec);
-    if (it == executables_.end() || it->second->context() != ctx) return CUDA_ERROR_INVALID_HANDLE;
+    if (it == executables_.end() || it->second.graph->context() != ctx) return CUDA_ERROR_INVALID_HANDLE;
     executables_.erase(it);
     return CUDA_SUCCESS;
 }
@@ -200,7 +246,7 @@ void GraphManager::retire_context(CUcontext ctx) {
     for (auto it = graphs_.begin(); it != graphs_.end();)
         if (it->second->context() == ctx) it = graphs_.erase(it); else ++it;
     for (auto it = executables_.begin(); it != executables_.end();)
-        if (it->second->context() == ctx) it = executables_.erase(it); else ++it;
+        if (it->second.graph->context() == ctx) it = executables_.erase(it); else ++it;
 }
 } // namespace fake_cuda::detail
 
@@ -208,11 +254,21 @@ using fake_cuda::detail::Scheduler;
 using fake_cuda::detail::scheduler;
 
 extern "C" {
+CUresult virtual_thread_exchange_capture_mode(CUstreamCaptureMode *mode) {
+    if (!mode || (*mode != CU_STREAM_CAPTURE_MODE_GLOBAL &&
+                  *mode != CU_STREAM_CAPTURE_MODE_THREAD_LOCAL &&
+                  *mode != CU_STREAM_CAPTURE_MODE_RELAXED)) return CUDA_ERROR_INVALID_VALUE;
+    int count = 0;
+    CUresult result = core_count(&count);
+    if (result != CUDA_SUCCESS) return result;
+    std::swap(*mode, fake_cuda::detail::thread_capture_mode);
+    return CUDA_SUCCESS;
+}
 CUresult virtual_stream_begin_capture(CUstream stream, CUstreamCaptureMode mode) {
     if (mode != CU_STREAM_CAPTURE_MODE_GLOBAL && mode != CU_STREAM_CAPTURE_MODE_THREAD_LOCAL &&
         mode != CU_STREAM_CAPTURE_MODE_RELAXED) return CUDA_ERROR_INVALID_VALUE;
     return scheduler().in_stream(stream, [&](Scheduler &s, CUcontext, fake_cuda::detail::Key key) {
-        return s.graph.begin_capture(s, key);
+        return s.graph.begin_capture(s, key, mode);
     });
 }
 CUresult virtual_stream_end_capture(CUstream stream, CUgraph *graph) {
@@ -224,7 +280,7 @@ CUresult virtual_stream_end_capture(CUstream stream, CUgraph *graph) {
 CUresult virtual_stream_is_capturing(CUstream stream, CUstreamCaptureStatus *status) {
     if (!status) return CUDA_ERROR_INVALID_VALUE;
     return scheduler().in_stream(stream, [&](Scheduler &s, CUcontext, fake_cuda::detail::Key key) {
-        *status = s.graph.capturing(key) ? CU_STREAM_CAPTURE_STATUS_ACTIVE : CU_STREAM_CAPTURE_STATUS_NONE;
+        s.graph.capture_info(key, status, nullptr, nullptr, nullptr, nullptr, nullptr);
         return CUDA_SUCCESS;
     });
 }

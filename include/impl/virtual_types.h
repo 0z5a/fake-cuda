@@ -34,6 +34,7 @@ struct Node {
     size_t bytes = 0;
     CUevent event = nullptr;
     CUdeviceptr first = 0, second = 0;
+    int priority = 0;
 };
 
 struct Event {

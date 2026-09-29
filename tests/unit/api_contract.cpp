@@ -330,7 +330,7 @@ void events_graphs_modules(CUstream s, CUdeviceptr dst) {
     OK(symbol<CaptureInfoLegacy>("cuStreamGetCaptureInfo")(s, &capture, &capture_id));
     CHECK(capture == CU_STREAM_CAPTURE_STATUS_NONE && capture_id == 0);
     CUgraph graph = nullptr;
-    EXPECT(API(cuStreamEndCapture, s, &graph), CUDA_ERROR_STREAM_CAPTURE_UNMATCHED);
+    EXPECT(API(cuStreamEndCapture, s, &graph), CUDA_ERROR_ILLEGAL_STATE);
     OK(API(cuStreamBeginCapture_v2, s, CU_STREAM_CAPTURE_MODE_GLOBAL));
     OK(API(cuStreamIsCapturing, s, &capture)); CHECK(capture == CU_STREAM_CAPTURE_STATUS_ACTIVE);
     CUgraph capture_graph = nullptr;
@@ -344,7 +344,13 @@ void events_graphs_modules(CUstream s, CUdeviceptr dst) {
     size_t active_nodes = 99;
     OK(API(cuGraphGetNodes, capture_graph, nullptr, &active_nodes)); CHECK(active_nodes == 0);
     EXPECT(API(cuStreamSynchronize, s), CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+    OK(API(cuStreamIsCapturing, s, &capture)); CHECK(capture == CU_STREAM_CAPTURE_STATUS_INVALIDATED);
+    EXPECT(API(cuStreamEndCapture, s, &graph), CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+    CHECK(graph == nullptr);
+    OK(API(cuStreamBeginCapture_v2, s, CU_STREAM_CAPTURE_MODE_GLOBAL));
     EXPECT(API(cuCtxSynchronize), CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+    EXPECT(API(cuStreamEndCapture, s, &graph), CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+    OK(API(cuStreamBeginCapture_v2, s, CU_STREAM_CAPTURE_MODE_GLOBAL));
     OK(API(cuStreamGetCaptureInfo_v3, s, &capture, &capture_id, &capture_graph,
            &dependencies, &edges, &dependency_count));
     CHECK(!edges && dependency_count == 0);

@@ -1,4 +1,5 @@
 #include "impl/virtual_work.h"
+#include "impl/core.h"
 #include "impl/scheduler.h"
 #include "profile/gh200.h"
 
@@ -27,7 +28,7 @@ CUresult copy_work(CUstream stream, Kind kind, size_t bytes, int async,
         };
         if ((first && valid(first) != CUDA_SUCCESS) || (second && valid(second) != CUDA_SUCCESS))
             return CUDA_ERROR_INVALID_VALUE;
-        if (!async && is_capture) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+        if (!async && is_capture) return s.graph.invalidate(key);
         OpPtr op;
         CUresult result = s.enqueue(key, {kind, bytes, nullptr, first, second}, &op);
         if (op) finish = op->end;
@@ -45,7 +46,7 @@ CUresult virtual_synchronize_stream(CUcontext ctx, CUstream stream, bool query) 
         Scheduler &s = scheduler();
         std::scoped_lock lock(s.mutex);
         if (s.retired.count(ctx)) return CUDA_ERROR_INVALID_CONTEXT;
-        if (s.graph.capturing(key_for(ctx, stream))) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+        if (s.graph.capturing(key_for(ctx, stream))) return s.graph.invalidate(key_for(ctx, stream));
         s.reap();
         end = s.queue.stream_end(key_for(ctx, stream));
     }
@@ -59,7 +60,7 @@ CUresult virtual_synchronize_context(CUcontext ctx) {
         Scheduler &s = scheduler();
         std::scoped_lock lock(s.mutex);
         if (s.retired.count(ctx)) return CUDA_ERROR_INVALID_CONTEXT;
-        if (s.graph.active(ctx)) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+        if (s.graph.active(ctx)) return s.graph.invalidate_context(ctx);
         end = s.queue.context_end(ctx);
         s.reap();
     }
@@ -111,12 +112,14 @@ CUresult virtual_mem_get_info(size_t *free_bytes, size_t *total_bytes) {
 }
 CUresult virtual_mem_alloc(CUdeviceptr *ptr, size_t bytes) {
     return scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
+        if (CUresult status = s.graph.check_unsafe_call(); status != CUDA_SUCCESS) return status;
         return s.memory.allocate(ctx, s.queue.device_for(ctx), ptr, bytes, VirtualClock::now());
     });
 }
 CUresult virtual_mem_free(CUdeviceptr ptr) {
     Time finish{};
     CUresult r = scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
+        if (CUresult status = s.graph.check_unsafe_call(); status != CUDA_SUCCESS) return status;
         finish = s.queue.context_end(ctx);
         return s.memory.free(ctx, ptr, finish);
     });
@@ -405,6 +408,9 @@ CUresult virtual_launch_kernel(CUfunction function, unsigned int gridX, unsigned
                                unsigned int gridZ, unsigned int blockX, unsigned int blockY,
                                unsigned int blockZ, unsigned int, CUstream stream, void **, void **) {
     if (!gridX || !gridY || !gridZ || !blockX || !blockY || !blockZ) return CUDA_ERROR_INVALID_VALUE;
+    int priority = 0;
+    CUresult status = core_stream_priority(stream, &priority);
+    if (status != CUDA_SUCCESS) return status;
     return scheduler().in_stream(stream, [&](Scheduler &s, CUcontext ctx, Key key) {
         auto it = s.functions.find(function);
         if (it == s.functions.end()) {
@@ -415,7 +421,7 @@ CUresult virtual_launch_kernel(CUfunction function, unsigned int gridX, unsigned
                 return CUDA_ERROR_INVALID_HANDLE;
         } else if (s.modules.find(it->second) == s.modules.end() ||
                    s.modules.at(it->second) != ctx) return CUDA_ERROR_INVALID_HANDLE;
-        return s.enqueue(key, {Kind::kernel, 0, nullptr});
+        return s.enqueue(key, {Kind::kernel, 0, nullptr, 0, 0, priority});
     });
 }
 } // extern "C"

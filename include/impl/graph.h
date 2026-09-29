@@ -27,7 +27,7 @@ public:
     CUcontext context() const noexcept { return context_; }
     const std::vector<GraphNode> &nodes() const noexcept { return nodes_; }
     CUresult supports(unsigned long long flags) const noexcept;
-    CUresult launch(Scheduler &scheduler, Key key) const;
+    CUresult launch(Scheduler &scheduler, Key key, OpPtr &completion) const;
 
 private:
     CUcontext context_;
@@ -46,7 +46,10 @@ public:
 
     bool capturing(Key key) const;
     CUresult append(Key key, Node node, CUcontext event_context, CUgraphNode handle, bool &captured);
-    CUresult begin_capture(Scheduler &scheduler, Key key);
+    CUresult begin_capture(Scheduler &scheduler, Key key, CUstreamCaptureMode mode);
+    CUresult invalidate(Key key);
+    CUresult invalidate_context(CUcontext context);
+    CUresult check_unsafe_call();
     CUresult end_capture(Key key, CUgraph *graph);
     void capture_info(Key key, CUstreamCaptureStatus *status, cuuint64_t *id,
                       CUgraph *graph, const CUgraphNode **dependencies,
@@ -54,7 +57,7 @@ public:
     CUresult get_nodes(CUcontext context, CUgraph graph, CUgraphNode *nodes, size_t *count) const;
     CUresult instantiate(Scheduler &scheduler, CUcontext context, CUgraph graph,
                          unsigned long long flags, CUgraphExec *exec);
-    CUresult launch(Scheduler &scheduler, CUgraphExec exec, Key key) const;
+    CUresult launch(Scheduler &scheduler, CUgraphExec exec, Key key);
     CUresult destroy(CUcontext context, CUgraph graph);
     CUresult destroy_exec(CUcontext context, CUgraphExec exec);
     void retire_stream(CUcontext context, Key key);
@@ -64,7 +67,11 @@ public:
 private:
     std::map<CUcontext, std::unique_ptr<Capture>> captures_;
     std::unordered_map<CUgraph, std::shared_ptr<const Graph>> graphs_;
-    std::unordered_map<CUgraphExec, std::shared_ptr<const Graph>> executables_;
+    struct Executable {
+        std::shared_ptr<const Graph> graph;
+        OpPtr completion;
+    };
+    std::unordered_map<CUgraphExec, Executable> executables_;
 };
 } // namespace fake_cuda::detail
 

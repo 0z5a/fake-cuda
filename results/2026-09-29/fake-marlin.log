@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/home/gongji/0z5a/lib/python3.12/site-packages/torch/_ops.py", line 1516, in load_library
+    ctypes.CDLL(path)
+  File "/home/gongji/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/ctypes/__init__.py", line 379, in __init__
+    self._handle = _dlopen(self._name, mode)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+OSError: /home/gongji/0z5a/lib/python3.12/site-packages/vllm/_C_stable_libtorch.abi3.so: undefined symbol: cuTensorMapEncodeTiled
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/gongji/0z5a/work/fake-cuda-pcie-test/patched/tests/integration/pytorch/marlin_control_flow.py", line 12, in <module>
+    torch.ops.load_library(str(args.extension))
+  File "/home/gongji/0z5a/lib/python3.12/site-packages/torch/_ops.py", line 1518, in load_library
+    raise OSError(f"Could not load this library: {path}") from e
+OSError: Could not load this library: /home/gongji/0z5a/lib/python3.12/site-packages/vllm/_C_stable_libtorch.abi3.so

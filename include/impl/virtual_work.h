@@ -31,6 +31,7 @@ CUresult virtual_stream_wait_event(CUstream stream, CUevent event, unsigned int 
 CUresult virtual_stream_begin_capture(CUstream stream, CUstreamCaptureMode mode);
 CUresult virtual_stream_end_capture(CUstream stream, CUgraph *graph);
 CUresult virtual_stream_is_capturing(CUstream stream, CUstreamCaptureStatus *status);
+CUresult virtual_thread_exchange_capture_mode(CUstreamCaptureMode *mode);
 CUresult virtual_stream_get_capture_info(CUstream stream, CUstreamCaptureStatus *status,
                                          cuuint64_t *id, CUgraph *graph,
                                          const CUgraphNode **dependencies,

@@ -1,0 +1,4 @@
+PASS: thread-local mode exchange
+PASS: relaxed allocation
+PASS: invalidation and recovery
+PASS: capture-mode exchange, thread isolation, relaxed allocation, invalidation/recovery, owner thread

@@ -90,6 +90,8 @@ FORWARD(cuStreamWaitEvent, virtual_stream_wait_event, (CUstream stream, CUevent 
 FORWARD(cuStreamBeginCapture_v2, virtual_stream_begin_capture, (CUstream stream, CUstreamCaptureMode mode), (stream, mode))
 FORWARD(cuStreamEndCapture, virtual_stream_end_capture, (CUstream stream, CUgraph *graph), (stream, graph))
 FORWARD(cuStreamIsCapturing, virtual_stream_is_capturing, (CUstream stream, CUstreamCaptureStatus *status), (stream, status))
+FORWARD(cuThreadExchangeStreamCaptureMode, virtual_thread_exchange_capture_mode,
+        (CUstreamCaptureMode *mode), (mode))
 
 FORWARD(cuGraphInstantiateWithFlags, virtual_graph_instantiate_flags,
         (CUgraphExec *exec, CUgraph graph, unsigned long long flags), (exec, graph, flags))
@@ -135,6 +137,10 @@ CUresult CUDAAPI cuGetErrorName(CUresult error, const char **name) {
     case CUDA_ERROR_INVALID_DEVICE: *name = "CUDA_ERROR_INVALID_DEVICE"; break;
     case CUDA_ERROR_INVALID_CONTEXT: *name = "CUDA_ERROR_INVALID_CONTEXT"; break;
     case CUDA_ERROR_INVALID_HANDLE: *name = "CUDA_ERROR_INVALID_HANDLE"; break;
+    case CUDA_ERROR_ILLEGAL_STATE: *name = "CUDA_ERROR_ILLEGAL_STATE"; break;
+    case CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED: *name = "CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED"; break;
+    case CUDA_ERROR_STREAM_CAPTURE_INVALIDATED: *name = "CUDA_ERROR_STREAM_CAPTURE_INVALIDATED"; break;
+    case CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD: *name = "CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD"; break;
     case CUDA_ERROR_NOT_SUPPORTED: *name = "CUDA_ERROR_NOT_SUPPORTED"; break;
     default: *name = "CUDA_ERROR_UNKNOWN"; break;
     }
@@ -196,6 +202,7 @@ static void *resolve(const char *symbol, int version) {
         ITEM(cuStreamGetDevice), ITEM(cuStreamGetFlags), ITEM(cuStreamGetPriority),
         ITEM(cuStreamQuery), ITEM(cuStreamSynchronize), ITEM(cuStreamWaitEvent),
         ITEM(cuStreamBeginCapture_v2), ITEM(cuStreamEndCapture), ITEM(cuStreamIsCapturing),
+        ITEM(cuThreadExchangeStreamCaptureMode),
                 ITEM(cuStreamGetCaptureInfo_v2), ITEM(cuStreamGetCaptureInfo_v3),
         ITEM(cuMemGetInfo_v2), {"cuMemGetInfo", (void *)cuMemGetInfo_v2},
         ITEM(cuMemAlloc_v2), {"cuMemAlloc", (void *)cuMemAlloc_v2},

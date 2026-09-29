@@ -20,6 +20,7 @@ CU_EXPORT CUresult CUDAAPI cuStreamWaitEvent(CUstream stream, CUevent event, uns
 CU_EXPORT CUresult CUDAAPI cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode);
 CU_EXPORT CUresult CUDAAPI cuStreamEndCapture(CUstream stream, CUgraph *graph);
 CU_EXPORT CUresult CUDAAPI cuStreamIsCapturing(CUstream stream, CUstreamCaptureStatus *status);
+CU_EXPORT CUresult CUDAAPI cuThreadExchangeStreamCaptureMode(CUstreamCaptureMode *mode);
 CU_EXPORT CUresult CUDAAPI cuStreamGetCaptureInfo(CUstream stream, CUstreamCaptureStatus *status,
                                                    cuuint64_t *id);
 CU_EXPORT CUresult CUDAAPI cuStreamGetCaptureInfo_v2(CUstream stream, CUstreamCaptureStatus *status,

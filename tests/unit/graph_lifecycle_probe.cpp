@@ -141,13 +141,13 @@ int main(int argc, char **argv) {
     OK(API(cuGraphGetNodes, graph, finished.data(), &count));
     CHECK(count == expected_nodes && finished == captured);
 
-    CUgraphExec one = nullptr, two = nullptr, unsupported = nullptr;
+    CUgraphExec one = nullptr, two = nullptr, default_priority = nullptr;
     CUDA_GRAPH_INSTANTIATE_PARAMS params{};
     OK(API(cuGraphInstantiateWithParams, &one, graph, &params));
     CHECK(one && params.result_out == CUDA_GRAPH_INSTANTIATE_SUCCESS);
-    EXPECT(API(cuGraphInstantiateWithFlags, &unsupported, graph,
-               CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY), CUDA_ERROR_NOT_SUPPORTED);
-    CHECK(unsupported == nullptr); // Per-node kernel priorities are not modeled.
+    OK(API(cuGraphInstantiateWithFlags, &default_priority, graph,
+           CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY));
+    OK(API(cuGraphExecDestroy, default_priority));
     OK(API(cuGraphInstantiateWithFlags, &two, graph, 0));
     CHECK(two && two != one);
     OK(API(cuGraphDestroy, graph));
@@ -160,6 +160,17 @@ int main(int argc, char **argv) {
 
     OK(API(cuGraphExecDestroy, one));
     OK(API(cuGraphExecDestroy, two));
+    CUstream high;
+    OK(API(cuStreamCreateWithPriority, &high, CU_STREAM_NON_BLOCKING, -1));
+    OK(API(cuStreamBeginCapture_v2, high, CU_STREAM_CAPTURE_MODE_GLOBAL));
+    OK(API(cuLaunchKernel, kernel, 1, 1, 1, 1, 1, 1, 0, high, nullptr, nullptr));
+    OK(API(cuStreamEndCapture, high, &graph));
+    CUgraphExec unsupported = nullptr;
+    EXPECT(API(cuGraphInstantiateWithFlags, &unsupported, graph,
+               CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY), CUDA_ERROR_NOT_SUPPORTED);
+    CHECK(unsupported == nullptr);
+    OK(API(cuGraphDestroy, graph));
+    OK(API(cuStreamDestroy_v2, high));
     OK(API(cuModuleUnload, module));
     OK(API(cuEventDestroy_v2, done));
     OK(API(cuEventDestroy_v2, second));
