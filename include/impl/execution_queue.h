@@ -1,6 +1,8 @@
 #ifndef FAKE_CUDA_IMPL_EXECUTION_QUEUE_H
 #define FAKE_CUDA_IMPL_EXECUTION_QUEUE_H
 
+#include "kernel_launch.h"
+
 #include <chrono>
 #include <memory>
 #include <vector>
@@ -9,6 +11,7 @@
 namespace fake_cuda {
 using VirtualClock = std::chrono::steady_clock;
 struct VirtualOperation {
+    std::shared_ptr<const KernelLaunch> launch;
     CUcontext context = nullptr;
     CUstream stream = nullptr;
     // Dependency edges are observational; the scheduler retains unfinished

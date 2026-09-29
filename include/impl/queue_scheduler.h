@@ -17,7 +17,7 @@ public:
     Time earliest(Key key, Kind kind, const OpPtr &dependency = {}, Time current = VirtualClock::now()) const;
     OpPtr schedule(Key key, Kind kind, size_t bytes = 0, const OpPtr &dependency = {},
                    Time current = VirtualClock::now());
-    // Peer ordinals must be validated by the caller (the device count is at most 8).
+    // Peer ordinals must be validated by the caller.
     Time earliest_peer(Key key, CUdevice src, CUdevice dst, const OpPtr &dependency = {},
                        Time current = VirtualClock::now()) const;
     OpPtr schedule_peer(Key key, CUdevice src, CUdevice dst, size_t bytes,

@@ -30,6 +30,7 @@ CUresult Scheduler::enqueue(Key key, Node node, OpPtr *result) {
     }
     OpPtr dependency = node.kind == Kind::wait ? event->second.record : OpPtr{};
     OpPtr op = queue.schedule(key, node.kind, node.bytes, dependency);
+    op->launch = std::move(node.launch);
     if (node.kind == Kind::record) event->second.record = op;
     if (result) *result = std::move(op);
     return CUDA_SUCCESS;
@@ -57,9 +58,9 @@ void Scheduler::retire_context(CUcontext ctx) {
         if (it->second.context == ctx) it = events.erase(it); else ++it;
 
     for (auto it = modules.begin(); it != modules.end();)
-        if (it->second == ctx) { auto mod = it->first;
+        if (it->second.context == ctx) { auto mod = it->first;
             for (auto f = functions.begin(); f != functions.end();)
-                if (f->second == mod) f = functions.erase(f); else ++f;
+                if (f->second.module == mod) f = functions.erase(f); else ++f;
             it = modules.erase(it);
         } else ++it;
     for (auto &[handle, library] : libraries) { (void)handle; library.modules.erase(ctx); }

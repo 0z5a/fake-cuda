@@ -91,6 +91,7 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
         else if (node.kind == Kind::wait) dependency = s.events.at(node.event).record;
         Key lane = lanes[entry.lane];
         OpPtr op = s.queue.schedule(lane, node.kind, node.bytes, dependency, launch_time);
+        op->launch = node.launch;
         if (node.kind == Kind::record) s.events.at(node.event).record = op;
         exits[entry.lane] = op;
         replay.push_back(std::move(op));

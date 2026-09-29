@@ -22,15 +22,15 @@ public:
     VirtualMemory memory;
     GraphManager graph;
     std::unordered_map<CUevent, Event> events;
-    std::unordered_map<CUmodule, CUcontext> modules;
-    std::unordered_map<CUfunction, CUmodule> functions;
+    std::unordered_map<CUmodule, ModuleRecord> modules;
+    std::unordered_map<CUfunction, FunctionRecord> functions;
     struct Library {
         std::unordered_map<std::string, CUkernel> kernels;
         std::unordered_map<CUcontext, CUmodule> modules;
     };
     // Libraries and kernel handles are process-wide; modules/functions are per-context.
     std::unordered_map<CUlibrary, Library> libraries;
-    std::unordered_map<CUkernel, CUlibrary> kernels;
+    std::unordered_map<CUkernel, KernelRecord> kernels;
     std::map<std::pair<CUkernel, CUcontext>, CUfunction> library_functions;
     std::set<CUcontext> retired;
     std::map<CUstream, CUcontext> destroyed_streams;

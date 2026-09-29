@@ -19,10 +19,12 @@ message(STATUS "CUDA Driver headers: ${CUDA_DRIVER_INCLUDE_DIR}")
 
 find_package(Threads REQUIRED)
 
-add_library(fake_cuda SHARED
+add_library(fake_cuda_objects OBJECT
     src/driver_api/common.c
     src/driver_api/cu12.c
     src/driver_api/cu13.c
+    src/impl/kernel_launch.cpp
+    src/impl/device_profile.cpp
     src/impl/core.cpp
     src/impl/private.cpp
     src/impl/capture.cpp
@@ -31,11 +33,17 @@ add_library(fake_cuda SHARED
     src/impl/scheduler.cpp
     src/impl/virtual_memory.cpp
     src/impl/virtual_work.cpp)
-target_compile_features(fake_cuda PRIVATE c_std_11 cxx_std_23)
-target_include_directories(fake_cuda PRIVATE
+target_compile_features(fake_cuda_objects PRIVATE c_std_11 cxx_std_23)
+target_include_directories(fake_cuda_objects PUBLIC
     "${PROJECT_SOURCE_DIR}/include"
     "${CUDA_DRIVER_INCLUDE_DIR}")
-target_compile_options(fake_cuda PRIVATE -Wall -Wextra)
+target_compile_options(fake_cuda_objects PRIVATE -Wall -Wextra)
+set_target_properties(fake_cuda_objects PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_EXTENSIONS OFF CXX_EXTENSIONS OFF
+    C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)
+add_library(fake_cuda SHARED $<TARGET_OBJECTS:fake_cuda_objects>)
+target_link_libraries(fake_cuda_objects PUBLIC Threads::Threads)
 target_link_libraries(fake_cuda PRIVATE Threads::Threads)
 set_target_properties(fake_cuda PROPERTIES
     C_EXTENSIONS OFF
@@ -52,6 +60,31 @@ target_link_options(fake_cuda PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(capture_device_profile tests/integration/tooling/capture_device_profile.cpp)
+    target_compile_features(capture_device_profile PRIVATE cxx_std_23)
+    target_include_directories(capture_device_profile PRIVATE "${CUDA_DRIVER_INCLUDE_DIR}")
+    target_link_libraries(capture_device_profile PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(capture_device_profile PROPERTIES CXX_EXTENSIONS OFF)
+    foreach(contract IN ITEMS device_profile_contract launch_metadata_contract)
+        add_executable(${contract} "tests/unit/${contract}.cpp")
+        target_compile_features(${contract} PRIVATE cxx_std_23)
+        target_link_libraries(${contract} PRIVATE fake_cuda_objects)
+        set_target_properties(${contract} PROPERTIES CXX_EXTENSIONS OFF)
+    endforeach()
+    add_test(NAME launch_metadata_contract COMMAND launch_metadata_contract)
+    foreach(count IN ITEMS 1 2 4 8 16 24 32 257)
+        add_test(NAME device_count_${count} COMMAND device_profile_contract ${count})
+        set_tests_properties(device_count_${count} PROPERTIES ENVIRONMENT "FAKE_CUDA_DEVICE_COUNT=${count}")
+    endforeach()
+    add_test(NAME device_profile_synthetic COMMAND device_profile_contract 4 synthetic)
+    set_tests_properties(device_profile_synthetic PROPERTIES ENVIRONMENT
+        "FAKE_CUDA_DEVICE_COUNT=4;FAKE_CUDA_PROFILE=${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic.profile")
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME device_profile_inputs COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tests/unit/device_profile_inputs.py"
+            "$<TARGET_FILE:device_profile_contract>" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic.profile")
+    endif()
     foreach(probe IN ITEMS driver_probe virtual_driver_probe virtual_multistream_probe
             multidevice_probe virtual_thread_probe)
         add_executable(${probe} "tests/unit/${probe}.cpp")

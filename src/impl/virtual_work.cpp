@@ -1,7 +1,7 @@
 #include "impl/virtual_work.h"
 #include "impl/core.h"
 #include "impl/scheduler.h"
-#include "profile/gh200.h"
+#include "impl/device.h"
 
 #include <chrono>
 
@@ -105,7 +105,7 @@ CUresult virtual_register_context(CUcontext context, CUdevice device) {
 CUresult virtual_mem_get_info(size_t *free_bytes, size_t *total_bytes) {
     if (!free_bytes || !total_bytes) return CUDA_ERROR_INVALID_VALUE;
     return scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
-        *total_bytes = fake_cuda::gh200::memory_bytes;
+        *total_bytes = fake_cuda::virtual_core_device(s.queue.device_for(ctx))->profile().memory_bytes;
         *free_bytes = s.memory.free_bytes(s.queue.device_for(ctx));
         return CUDA_SUCCESS;
     });
@@ -301,7 +301,7 @@ CUresult virtual_library_unload(CUlibrary library) {
     for (const auto &[ctx, module] : lib->second.modules) {
         (void)ctx;
         for (auto it = s.functions.begin(); it != s.functions.end();)
-            if (it->second == module) it = s.functions.erase(it); else ++it;
+            if (it->second.module == module) it = s.functions.erase(it); else ++it;
         s.modules.erase(module);
     }
     s.libraries.erase(lib);
@@ -318,7 +318,9 @@ CUresult virtual_library_get_kernel(CUkernel *kernel, CUlibrary library, const c
         if (found != lib->second.kernels.end()) { *kernel = found->second; return CUDA_SUCCESS; }
         CUkernel id = s.opaque<CUkernel>();
         lib->second.kernels.emplace(name, id);
-        s.kernels.emplace(id, library);
+        s.kernels.emplace(id, fake_cuda::KernelRecord{library,
+            std::make_shared<const fake_cuda::KernelIdentity>(
+                fake_cuda::KernelIdentity{reinterpret_cast<std::uintptr_t>(library), name})});
         *kernel = id;
         return CUDA_SUCCESS;
     } catch (const std::bad_alloc &) { return CUDA_ERROR_OUT_OF_MEMORY; }
@@ -333,7 +335,7 @@ CUresult virtual_library_get_module(CUmodule *module, CUlibrary library) {
             return CUDA_SUCCESS;
         }
         CUmodule id = s.opaque<CUmodule>();
-        s.modules.emplace(id, ctx);
+        s.modules.emplace(id, fake_cuda::ModuleRecord{ctx, reinterpret_cast<std::uintptr_t>(library)});
         lib->second.modules.emplace(ctx, id);
         *module = id;
         return CUDA_SUCCESS;
@@ -344,7 +346,7 @@ CUresult virtual_kernel_get_function(CUfunction *function, CUkernel kernel) {
     return scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
         auto lib_id = s.kernels.find(kernel);
         if (lib_id == s.kernels.end()) return CUDA_ERROR_INVALID_HANDLE;
-        auto lib = s.libraries.find(lib_id->second);
+        auto lib = s.libraries.find(lib_id->second.library);
         if (lib == s.libraries.end()) return CUDA_ERROR_INVALID_HANDLE;
         auto key = std::make_pair(kernel, ctx);
         if (auto found = s.library_functions.find(key); found != s.library_functions.end()) {
@@ -355,11 +357,11 @@ CUresult virtual_kernel_get_function(CUfunction *function, CUkernel kernel) {
         if (auto found = lib->second.modules.find(ctx); found != lib->second.modules.end()) module = found->second;
         else {
             module = s.opaque<CUmodule>();
-            s.modules.emplace(module, ctx);
+            s.modules.emplace(module, fake_cuda::ModuleRecord{ctx, reinterpret_cast<std::uintptr_t>(lib_id->second.library)});
             lib->second.modules.emplace(ctx, module);
         }
         CUfunction id = s.opaque<CUfunction>();
-        s.functions.emplace(id, module);
+        s.functions.emplace(id, fake_cuda::FunctionRecord{module, lib_id->second.identity});
         s.library_functions.emplace(key, id);
         *function = id;
         return CUDA_SUCCESS;
@@ -369,7 +371,7 @@ CUresult virtual_module_load_data(CUmodule *module, const void *image) {
     if (!module || !image) return CUDA_ERROR_INVALID_VALUE;
     return scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
         CUmodule id = s.opaque<CUmodule>();
-        s.modules.emplace(id, ctx);
+        s.modules.emplace(id, fake_cuda::ModuleRecord{ctx, reinterpret_cast<std::uintptr_t>(id)});
         *module = id;
         return CUDA_SUCCESS;
     });
@@ -378,9 +380,16 @@ CUresult virtual_module_get_function(CUfunction *function, CUmodule module, cons
     if (!function || !name || !*name) return CUDA_ERROR_INVALID_VALUE;
     return scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
         auto it = s.modules.find(module);
-        if (it == s.modules.end() || it->second != ctx) return CUDA_ERROR_INVALID_HANDLE;
+        if (it == s.modules.end() || it->second.context != ctx) return CUDA_ERROR_INVALID_HANDLE;
+        for (const auto &[handle, record] : s.functions)
+            if (record.module == module && record.kernel->symbol == name) {
+                *function = handle;
+                return CUDA_SUCCESS;
+            }
         CUfunction id = s.opaque<CUfunction>();
-        s.functions.emplace(id, module);
+        s.functions.emplace(id, fake_cuda::FunctionRecord{module,
+            std::make_shared<const fake_cuda::KernelIdentity>(
+                fake_cuda::KernelIdentity{it->second.load_id, name})});
         *function = id;
         return CUDA_SUCCESS;
     });
@@ -388,9 +397,9 @@ CUresult virtual_module_get_function(CUfunction *function, CUmodule module, cons
 CUresult virtual_module_unload(CUmodule module) {
     return scheduler().in_context([&](Scheduler &s, CUcontext ctx) {
         auto it = s.modules.find(module);
-        if (it == s.modules.end() || it->second != ctx) return CUDA_ERROR_INVALID_HANDLE;
+        if (it == s.modules.end() || it->second.context != ctx) return CUDA_ERROR_INVALID_HANDLE;
         for (auto f = s.functions.begin(); f != s.functions.end();)
-            if (f->second == module) f = s.functions.erase(f); else ++f;
+            if (f->second.module == module) f = s.functions.erase(f); else ++f;
         for (auto &[handle, library] : s.libraries) {
             (void)handle;
             if (auto found = library.modules.find(ctx);
@@ -406,22 +415,35 @@ CUresult virtual_module_unload(CUmodule module) {
 }
 CUresult virtual_launch_kernel(CUfunction function, unsigned int gridX, unsigned int gridY,
                                unsigned int gridZ, unsigned int blockX, unsigned int blockY,
-                               unsigned int blockZ, unsigned int, CUstream stream, void **, void **) {
-    if (!gridX || !gridY || !gridZ || !blockX || !blockY || !blockZ) return CUDA_ERROR_INVALID_VALUE;
+                               unsigned int blockZ, unsigned int shared_bytes, CUstream stream,
+                               void **params, void **extra) {
+    if (params && extra) return CUDA_ERROR_INVALID_VALUE;
     int priority = 0;
     CUresult status = core_stream_priority(stream, &priority);
     if (status != CUDA_SUCCESS) return status;
     return scheduler().in_stream(stream, [&](Scheduler &s, CUcontext ctx, Key key) {
+        std::shared_ptr<const fake_cuda::KernelIdentity> identity;
         auto it = s.functions.find(function);
         if (it == s.functions.end()) {
-            // CUDA 13's Runtime can launch a context-independent library
-            // kernel directly through the CUfunction-sized launch handle.
+            // CUDA 13 also accepts context-independent library kernel handles.
             auto kernel = s.kernels.find(reinterpret_cast<CUkernel>(function));
-            if (kernel == s.kernels.end() || !s.libraries.contains(kernel->second))
+            if (kernel == s.kernels.end() || !s.libraries.contains(kernel->second.library))
                 return CUDA_ERROR_INVALID_HANDLE;
-        } else if (s.modules.find(it->second) == s.modules.end() ||
-                   s.modules.at(it->second) != ctx) return CUDA_ERROR_INVALID_HANDLE;
-        return s.enqueue(key, {Kind::kernel, 0, nullptr, 0, 0, priority});
+            identity = kernel->second.identity;
+        } else {
+            auto module = s.modules.find(it->second.module);
+            if (module == s.modules.end() || module->second.context != ctx) return CUDA_ERROR_INVALID_HANDLE;
+            identity = it->second.kernel;
+        }
+        auto launch = std::make_shared<fake_cuda::KernelLaunch>(fake_cuda::KernelLaunch{
+            identity, {gridX, gridY, gridZ}, {blockX, blockY, blockZ}, shared_bytes,
+            fake_cuda::ParameterEncoding::unknown_layout, {}});
+        const auto &profile = fake_cuda::virtual_core_device(s.queue.device_for(ctx))->profile();
+        CUresult result = launch->validate(profile);
+        if (result != CUDA_SUCCESS) return result;
+        if (extra && (result = launch->snapshot(extra)) != CUDA_SUCCESS) return result;
+        // kernelParams needs the image's parameter layout. Never retain void** or guess sizes.
+        return s.enqueue(key, {Kind::kernel, 0, nullptr, 0, 0, priority, std::move(launch)});
     });
 }
 } // extern "C"

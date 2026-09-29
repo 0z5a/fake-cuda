@@ -84,7 +84,7 @@ Time QueueScheduler::earliest_peer(Key key, CUdevice src, CUdevice dst,
     device_for(key.context);
     if (src == dst)
         return earliest_on(key, &virtual_core_device(dst)->compute_queue, dependency, current);
-    return earliest_on(key, &virtual_core_device(src)->p2p_queues.at(dst), dependency, current);
+    return earliest_on(key, &virtual_core_device(src)->p2p_queues[dst], dependency, current);
 }
 OpPtr QueueScheduler::schedule_on(Key key, Kind kind, size_t bytes, const OpPtr &dependency,
                                   Time current, ExecutionQueue *resource_queue) {
@@ -129,7 +129,7 @@ OpPtr QueueScheduler::schedule_peer(Key key, CUdevice src, CUdevice dst, size_t 
         return schedule_on(key, Kind::compute, bytes, dependency, current,
                            &virtual_core_device(dst)->compute_queue);
     return schedule_on(key, Kind::peer, bytes, dependency, current,
-                       &virtual_core_device(src)->p2p_queues.at(dst));
+                       &virtual_core_device(src)->p2p_queues[dst]);
 }
 void QueueScheduler::include_context(CUcontext ctx, Time end) {
     device_for(ctx);

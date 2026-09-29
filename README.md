@@ -8,7 +8,7 @@
 Driver API calls
       |
       v
-Device 0 (GH200 profile)                         Device 1 ... (optional)
+Device 0 (selected profile)                         Device 1 ... (optional)
   |                                              |
   +-- primary Context / other Contexts          +-- Contexts
   |     +-- Stream A                             |     +-- Streams
@@ -26,7 +26,26 @@ A **context** associates work with a device; a **stream** determines operation o
 
 **CUDA ordering versus this simulator:** CUDA preserves in-stream order and explicit event/default-stream dependencies, but does not guarantee FCFS order or concurrency between independent streams. Stream priority (lower number means higher priority) is a non-preemptive *hint* for preferentially launching compute kernels when possible, not a guarantee of execution order; NVIDIA states that it does not affect H2D/D2H copies. Our resource queues currently reserve work in submission order without using stream priority, as a deterministic **timing heuristic**, not a model of CUDA hardware arbitration. [Driver stream priorities](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__STREAM.html) · [default-stream synchronization](https://docs.nvidia.com/cuda/cuda-driver-api/stream-sync-behavior.html).
 
-One virtual GH200-profile device is exposed by default. `FAKE_CUDA_DEVICE_COUNT=1..8` selects more independent virtual devices; the P2P queues model outgoing transfers between them. H2D/D2H delays depend on transfer size and configurable virtual bandwidth; kernels currently cost 10 ms of virtual time.
+One virtual GH200-profile device is exposed by default. `FAKE_CUDA_DEVICE_COUNT=1..1024` selects more independent virtual devices; the P2P queues model outgoing transfers between them. H2D/D2H delays depend on transfer size and configurable virtual bandwidth; kernels currently cost 10 ms of virtual time.
+
+## Device profiles and launch records
+
+`FAKE_CUDA_PROFILE=/absolute/path/device.profile` replaces the default capability snapshot for all virtual devices. Configure it before loading the Driver. Device name, attributes, total/free memory, allocation admission and launch dimension ceilings share this profile. Device storage grows with the configured count; outgoing P2P queues are created on use. The count limit of 1024 is a simulator configuration bound. UUIDs distinguish ordinals within one process, not hosts across a cluster.
+
+Profiles are UTF-8 `key=value` files with `schema=1`, `name`, `source`, `memory_bytes`, and optional `attribute.<CUDA enum number>` entries. No whitespace trimming or escaping is applied; blank lines and `#` comments are allowed. Memory uses bytes and attributes retain CUDA's documented units (for example, clock rate is kHz). Missing attributes known to the build headers return `CUDA_ERROR_NOT_SUPPORTED`; other unknown enum values return `CUDA_ERROR_INVALID_VALUE`. Explicitly supplied numeric attributes can come from newer CUDA headers; malformed files/counts make `cuInit` and `cuDeviceGetCount` return `CUDA_ERROR_INVALID_VALUE`. The [synthetic fixture](tests/fixtures/synthetic.profile) is for contracts only.
+
+The build includes a read-only collector for a real Driver (queries attributes known to its build headers):
+
+```sh
+build/capture_device_profile /path/to/real/libcuda.so.1 0 > device.profile
+FAKE_CUDA_DEVICE_COUNT=4 FAKE_CUDA_PROFILE="$PWD/device.profile" your-command
+```
+
+This file describes capabilities, not measured bandwidth, peer connectivity or runtime operating state. Those still need separate calibration; selecting four devices does not establish a measured four-GPU topology.
+
+Eager and captured kernels now retain the same immutable launch record: load identity and symbol, grid/block dimensions, dynamic shared memory, and an owned copy of an explicitly packed `extra` parameter buffer. Library kernels keep the same load identity through context-specific modules. Captured records survive temporary host argument storage and source graph destruction. [CUDA launch parameter conventions](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__EXEC.html).
+
+Images remain opaque: `kernelParams` has an unknown layout and is never retained or dereferenced without an ABI. Static resources, parameter types, pointed-to allocation generations and content hashes are not decoded yet. Packed snapshots copy parameter bytes, not tensor data. Load IDs are process-local identities, not predictor cache keys. Kernel duration remains the 10 ms heuristic; this is the first profile/metadata slice, not calibrated execution prediction.
 
 ## Build and try it
 
@@ -52,6 +71,8 @@ The PyTorch probes run in Docker with no GPU devices and no network; `all` check
 ## Debugging findings
 
 These are conclusions from observed failures and targeted probes, not a claim of full CUDA compatibility:
+
+- **Device configuration:** Multi-digit device counts previously fell back to one, and memory accounting used a fixed GH200 capacity. Strict count parsing and one profile-backed memory path now cover discovery, admission and free-memory queries. Contract tests cover 1/2/4/8/16/24/32/257 devices, unique ordinal UUIDs, independent accounting and malformed configuration. The original 148 GH200 attributes remain queryable even when the build headers end at a lower attribute number.
 
 - **Replay ordering across launch streams:** Two launches of the same executable previously overlapped on different resource queues. Executables now retain their previous completion independently of the shared graph definition. Replay uses private lanes with launch-stream entry and exit dependencies. A two-copy regression changes the incorrect 80 ms completion separation to 160 ms; distinct executables retain 80 ms separation under the same synthetic resource model. This is a correctness correction, not a speedup.
 - **PyTorch 2.13 capture initialization:** This version's RNG-state setup uses `cuThreadExchangeStreamCaptureMode` to allocate outside the graph under a relaxed guard. The missing entry point blocked `capture_begin()`. Thread-local mode exchange, allocation restrictions and capture invalidation now support that path. A real Driver oracle also verifies recovery after invalidation and that a wrong-thread EndCapture ends capture with an error. PyTorch copy and vector-add capture/four-replay fixtures pass in a GPU-free container; the matching real-CUDA fixtures check values. Default-priority kernel nodes accept the node-priority instantiate flag; nonzero captured priorities still return not-supported.

@@ -35,6 +35,7 @@ struct Node {
     CUevent event = nullptr;
     CUdeviceptr first = 0, second = 0;
     int priority = 0;
+    std::shared_ptr<const KernelLaunch> launch = nullptr;
 };
 
 struct Event {
