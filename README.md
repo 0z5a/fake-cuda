@@ -68,7 +68,20 @@ The internal C++ `PerformanceModel` interface supplies one `PredictorResult` per
 
 `SyntheticConstant` preserves `synthetic_constant_v1` at 10 ms. `MeasuredReplay` is a finite ordered oracle with explicit bindings to this process's context, device/profile, module load and symbol, grid/block, dynamic shared memory, packed parameters and eager/graph mode. A missing, reordered or mismatched invocation returns `CUDA_ERROR_NOT_SUPPORTED`, with a reason retained by the scheduler. Unknown parameter layouts are rejected. It does not match kernels by symbol alone or infer measurements from opaque images.
 
-An embedding harness installs the provider through `Scheduler::performance_model` under its mutex. This increment has no measurement-file loader, environment selector or framework adapter. The caller must pair each sample with the actual invocation and its measurement conditions, including input contents and cache state. The simulator cannot validate pointed-to data or establish cross-run binary identity; these bindings are not portable calibration data.
+An embedding harness installs the provider through `Scheduler::performance_model` under its mutex. `load_measured_replay(input, bindings)` reads an ordered timing file and returns either a complete provider or a line-numbered error. Each `ReplayBinding` pairs an external binding ID, code identity, hardware identity and measurement conditions with the current context/device/profile and owned launch descriptor. The loader matches every row against those bindings. The harness must verify these identities against its known code bytes, hardware and conditions, including input contents and cache state; the shim cannot derive them from opaque handles or inspect pointed-to data. There is no environment selector or framework adapter.
+
+Timing files use the following four required headers, followed by one `sample=` row per invocation:
+
+```text
+schema=1
+source=measurement provenance
+scope=kernel
+included_costs=device_service
+```
+
+Each row has exactly eleven tab-separated fields: binding ID, code identity, hardware identity, conditions, symbol, mode (`eager` or `graph_replay`), grid (`x,y,z`), block (`x,y,z`), dynamic shared bytes, packed parameter hex (`-` for empty), and service nanoseconds. See the [synthetic format fixture](tests/fixtures/kernel.timing). Blank lines, `#` comments, LF and CRLF are accepted; no whitespace trimming or escaping is applied. Headers precede samples. Unknown/duplicate headers, incomplete bindings, identity/metadata mismatches, invalid durations and read errors reject the entire file, including when earlier rows were valid.
+
+Loaded predictions retain the source, binding/code/hardware/condition identities and zero-based sample index on the scheduled operation. Runtime invocation matching, graph preflight and finite-sample exhaustion still apply after loading. This makes file reuse explicit; matching caller-supplied identity strings is not independent proof of hardware calibration. [File-loader validation and timings](results/2026-09-30/replay-file.md).
 
 Capture stores metadata without querying or charging the provider. Replay predicts all kernel nodes once, uses those same results in temporal preflight and submission, and consumes samples only after successful scheduling. A failed preflight neither advances the replay cursor nor charges kernel service. Each scheduled kernel retains its prediction and provenance.
 

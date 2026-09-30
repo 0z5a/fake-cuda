@@ -17,12 +17,18 @@ enum class TimingScope { kernel, whole_forward };
 enum class IncludedCosts { device_service, end_to_end };
 enum class ConfidenceKind { synthetic, measured_replay };
 
+struct MeasurementIdentity {
+    std::string binding, code, hardware, conditions;
+    size_t sample_index;
+};
+
 struct PredictorResult {
     Nanoseconds service_time;
     TimingScope scope = TimingScope::kernel;
     IncludedCosts included_costs = IncludedCosts::device_service;
     ConfidenceKind confidence = ConfidenceKind::synthetic;
     std::string source;
+    std::optional<MeasurementIdentity> measurement{};
     bool supported() const;
 };
 PredictorResult synthetic_kernel_prediction();

@@ -1,0 +1,8 @@
+# Synthetic contract values, not a hardware measurement. Sample fields use tabs.
+schema=1
+source=synthetic replay-file contract
+scope=kernel
+included_costs=device_service
+sample=case0	contract-code-v1	contract-hardware-v1	fixed-empty-arguments	timing_contract	eager	1,1,1	32,1,1	0	-	7000000
+sample=case0	contract-code-v1	contract-hardware-v1	fixed-empty-arguments	timing_contract	graph_replay	1,1,1	32,1,1	0	-	11000000
+sample=case0	contract-code-v1	contract-hardware-v1	fixed-empty-arguments	timing_contract	graph_replay	1,1,1	32,1,1	0	-	13000000
