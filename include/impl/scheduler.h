@@ -19,6 +19,9 @@ public:
     // Mutable scheduling state and device resource queues are accessed under mutex.
     std::mutex mutex;
     QueueScheduler queue;
+    std::shared_ptr<PerformanceModel> performance_model = std::make_shared<SyntheticConstant>();
+    TimingLedger timing;
+    std::string prediction_error;
     VirtualMemory memory;
     GraphManager graph;
     std::unordered_map<CUevent, Event> events;
@@ -38,6 +41,8 @@ public:
 
     void reap();
     CUresult enqueue(Key key, Node node, OpPtr *result = nullptr);
+    CUresult predict(std::span<const KernelQuery> queries, std::vector<PredictorResult> &results);
+    void commit_predictions(std::span<const PredictorResult> results);
 
     CUresult begin_retire_context(CUcontext ctx);
     void retire_stream(CUcontext ctx, CUstream stream);

@@ -58,9 +58,21 @@ These files describe capabilities and direct peer access, not transport routes, 
 
 Eager and captured kernels now retain the same immutable launch record: load identity and symbol, grid/block dimensions, dynamic shared memory, and an owned copy of an explicitly packed `extra` parameter buffer. Library kernels keep the same load identity through context-specific modules. Captured records survive temporary host argument storage and source graph destruction. [CUDA launch parameter conventions](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__EXEC.html).
 
-Images remain opaque: `kernelParams` has an unknown layout and is never retained or dereferenced without an ABI. Static resources, parameter types, pointed-to allocation generations and content hashes are not decoded yet. Packed snapshots copy parameter bytes, not tensor data. Load IDs are process-local identities, not predictor cache keys. Kernel duration remains the 10 ms heuristic; this is the first profile/metadata slice, not calibrated execution prediction.
+Images remain opaque: `kernelParams` has an unknown layout and is never retained or dereferenced without an ABI. Static resources, parameter types, pointed-to allocation generations and content hashes are not decoded yet. Packed snapshots copy parameter bytes, not tensor data. Load IDs are process-local identities, not predictor cache keys. The default kernel duration remains the 10 ms heuristic.
 
 A standalone real-Driver oracle, `build/driver_graph_contract /path/to/real/libcuda.so.1`, checks peer query/enable/disable state, cross-stream capture, changed-input replay values and eager/graph timing on every visible GPU. It uses bounded pinned buffers and requires CUDA 13 Driver entry points. Results cover [four RTX 5060 Ti devices](results/2026-09-29/four-device-validation.md) and [cross-validation on four A100 SXM4 devices](results/2026-09-29/a100-cross-validation.md).
+
+## Kernel service-time providers
+
+The internal C++ `PerformanceModel` interface supplies one `PredictorResult` per kernel invocation, shared by eager submission and graph replay. Results declare duration in nanoseconds, accounting scope, included costs, confidence kind and source. Only kernel device-service costs are accepted here; whole-forward and end-to-end estimates are rejected to prevent charging their host/communication work again. Transfer timing remains the existing bandwidth model.
+
+`SyntheticConstant` preserves `synthetic_constant_v1` at 10 ms. `MeasuredReplay` is a finite ordered oracle with explicit bindings to this process's context, device/profile, module load and symbol, grid/block, dynamic shared memory, packed parameters and eager/graph mode. A missing, reordered or mismatched invocation returns `CUDA_ERROR_NOT_SUPPORTED`, with a reason retained by the scheduler. Unknown parameter layouts are rejected. It does not match kernels by symbol alone or infer measurements from opaque images.
+
+An embedding harness installs the provider through `Scheduler::performance_model` under its mutex. This increment has no measurement-file loader, environment selector or framework adapter. The caller must pair each sample with the actual invocation and its measurement conditions, including input contents and cache state. The simulator cannot validate pointed-to data or establish cross-run binary identity; these bindings are not portable calibration data.
+
+Capture stores metadata without querying or charging the provider. Replay predicts all kernel nodes once, uses those same results in temporal preflight and submission, and consumes samples only after successful scheduling. A failed preflight neither advances the replay cursor nor charges kernel service. Each scheduled kernel retains its prediction and provenance.
+
+`TimingLedger` separates the sum of committed kernel service durations from predictor query wall time. Target-host time is explicitly unknown until a host model exists. The service sum is not elapsed makespan and excludes transfers; query wall time is not total simulator overhead. Scheduling remains paced with `steady_clock`, so slow queries can delay wall-clock submission even though their cost is not added to kernel service. This is not yet coordinated offline time. [Contract checks and before/after timings](results/2026-09-30/predictor-contract.md).
 
 ## Build and try it
 

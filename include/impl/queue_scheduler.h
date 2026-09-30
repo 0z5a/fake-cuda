@@ -16,7 +16,7 @@ public:
     CUdevice device_for(CUcontext ctx) const { return devices.at(ctx); }
     Time earliest(Key key, Kind kind, const OpPtr &dependency = {}, Time current = VirtualClock::now()) const;
     OpPtr schedule(Key key, Kind kind, size_t bytes = 0, const OpPtr &dependency = {},
-                   Time current = VirtualClock::now());
+                   Time current = VirtualClock::now(), const PredictorResult *prediction = nullptr);
     // Peer ordinals must be validated by the caller.
     Time earliest_peer(Key key, CUdevice src, CUdevice dst, const OpPtr &dependency = {},
                        Time current = VirtualClock::now()) const;
@@ -34,7 +34,7 @@ private:
     Time earliest_on(Key key, const ExecutionQueue *resource_queue, const OpPtr &dependency,
                      Time current) const;
     OpPtr schedule_on(Key key, Kind kind, size_t bytes, const OpPtr &dependency,
-                      Time current, ExecutionQueue *resource_queue);
+                      Time current, ExecutionQueue *resource_queue, const PredictorResult *prediction = nullptr);
     std::map<CUcontext, CUdevice> devices;
 
     std::map<Key, OpPtr> tails;

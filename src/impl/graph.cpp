@@ -39,6 +39,21 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
             (node.second && s.memory.check_bounds(ctx, node.second, node.bytes) != CUDA_SUCCESS))
             return CUDA_ERROR_INVALID_VALUE;
     }
+    auto *device = fake_cuda::virtual_core_device(s.queue.device_for(ctx));
+    std::vector<KernelQuery> queries;
+    std::vector<size_t> prediction_index(nodes_.size(), no_node);
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        const auto &node = nodes_[i].node;
+        if (node.kind != Kind::kernel) continue;
+        prediction_index[i] = queries.size();
+        queries.push_back({ctx, device->ordinal(), &device->profile(), node.launch.get(), LaunchMode::graph_replay});
+    }
+    std::vector<PredictorResult> predictions;
+    CUresult status = s.predict(queries, predictions);
+    if (status != CUDA_SUCCESS) return status;
+    auto prediction_for = [&](size_t i) -> const PredictorResult * {
+        return prediction_index[i] == no_node ? nullptr : &predictions[prediction_index[i]];
+    };
     std::vector<Key> lanes(lanes_);
     for (size_t i = 0; i < lanes_; ++i)
         lanes[i] = {ctx, reinterpret_cast<CUstream>(std::numeric_limits<std::uintptr_t>::max() - s.new_handle()), 0, false};
@@ -48,7 +63,6 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
     Time launch_time = VirtualClock::now();
     std::vector<Time> predicted(nodes_.size());
     std::vector<Time> lane_end(lanes_, s.queue.earliest(key, Kind::marker, completion, launch_time));
-    auto *device = fake_cuda::virtual_core_device(s.queue.device_for(ctx));
     Time h2d_available = device->h2d_queue.available_at();
     Time d2h_available = device->d2h_queue.available_at();
     Time compute_available = device->compute_queue.available_at();
@@ -75,7 +89,8 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
         if ((node.first && s.memory.check_pointer(ctx, node.first, node.bytes, at) != CUDA_SUCCESS) ||
             (node.second && s.memory.check_pointer(ctx, node.second, node.bytes, at) != CUDA_SUCCESS))
             return CUDA_ERROR_INVALID_VALUE;
-        predicted[i] = at + QueueScheduler::duration(node.kind, node.bytes);
+        const auto *prediction = prediction_for(i);
+        predicted[i] = at + (prediction ? prediction->service_time : QueueScheduler::duration(node.kind, node.bytes));
         lane_end[entry.lane] = predicted[i];
         if (available) *available = predicted[i];
     }
@@ -84,13 +99,14 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
     const OpPtr entry = s.queue.schedule(key, Kind::marker, 0, completion, launch_time);
     for (Key lane : lanes) s.queue.schedule(lane, Kind::marker, 0, entry, launch_time);
     std::vector<OpPtr> exits(lanes_, entry);
-    for (const GraphNode &entry : nodes_) {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        const GraphNode &entry = nodes_[i];
         const Node &node = entry.node;
         OpPtr dependency;
         if (entry.event_dependency != no_node) dependency = replay[entry.event_dependency];
         else if (node.kind == Kind::wait) dependency = s.events.at(node.event).record;
         Key lane = lanes[entry.lane];
-        OpPtr op = s.queue.schedule(lane, node.kind, node.bytes, dependency, launch_time);
+        OpPtr op = s.queue.schedule(lane, node.kind, node.bytes, dependency, launch_time, prediction_for(i));
         op->launch = node.launch;
         if (node.kind == Kind::record) s.events.at(node.event).record = op;
         exits[entry.lane] = op;
@@ -100,6 +116,7 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
     for (const OpPtr &exit : exits)
         completion = s.queue.schedule(key, Kind::marker, 0, exit, launch_time);
     for (Key lane : lanes) s.queue.retire_stream(lane);
+    s.commit_predictions(predictions);
     return CUDA_SUCCESS;
 }
 
