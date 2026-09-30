@@ -26,6 +26,8 @@ add_library(fake_cuda_objects OBJECT
     src/impl/kernel_launch.cpp
     src/impl/perf_model.cpp
     src/impl/kernel_replay.cpp
+    src/impl/resource_engine.cpp
+    src/impl/topology.cpp
     src/impl/replay_file.cpp
     src/impl/device_profile.cpp
     src/impl/core.cpp
@@ -63,6 +65,14 @@ target_link_options(fake_cuda PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(residency_probe tests/integration/tooling/residency_probe.cpp)
+    target_compile_features(residency_probe PRIVATE cxx_std_23)
+    target_link_libraries(residency_probe PRIVATE fake_cuda_objects)
+    set_target_properties(residency_probe PROPERTIES CXX_EXTENSIONS OFF)
+    add_executable(resource_engine_bridge tests/integration/tooling/resource_engine_bridge.cpp)
+    target_compile_features(resource_engine_bridge PRIVATE cxx_std_23)
+    target_link_libraries(resource_engine_bridge PRIVATE fake_cuda_objects)
+    set_target_properties(resource_engine_bridge PROPERTIES CXX_EXTENSIONS OFF)
     add_executable(replay_probe tests/integration/tooling/replay_probe.cpp)
     target_compile_features(replay_probe PRIVATE cxx_std_23)
     target_link_libraries(replay_probe PRIVATE fake_cuda_objects)
@@ -74,7 +84,7 @@ if(BUILD_TESTING)
         target_link_libraries(${tool} PRIVATE ${CMAKE_DL_LIBS})
         set_target_properties(${tool} PROPERTIES CXX_EXTENSIONS OFF)
     endforeach()
-    foreach(contract IN ITEMS device_profile_contract device_system_contract launch_metadata_contract perf_model_contract replay_file_contract kernel_replay_contract)
+    foreach(contract IN ITEMS device_profile_contract device_system_contract launch_metadata_contract perf_model_contract replay_file_contract kernel_replay_contract resource_engine_contract topology_contract)
         add_executable(${contract} "tests/unit/${contract}.cpp")
         target_compile_features(${contract} PRIVATE cxx_std_23)
         target_link_libraries(${contract} PRIVATE fake_cuda_objects)
@@ -87,6 +97,8 @@ if(BUILD_TESTING)
     add_test(NAME perf_model_contract COMMAND perf_model_contract)
     add_test(NAME replay_file_contract COMMAND replay_file_contract "${PROJECT_SOURCE_DIR}/tests/fixtures/kernel.timing")
     add_test(NAME kernel_replay_contract COMMAND kernel_replay_contract "${PROJECT_SOURCE_DIR}/tests/fixtures/kernel.timing")
+    add_test(NAME resource_engine_contract COMMAND resource_engine_contract)
+    add_test(NAME topology_contract COMMAND topology_contract)
     foreach(count IN ITEMS 1 2 4 8 16 24 32 257)
         add_test(NAME device_count_${count} COMMAND device_profile_contract ${count})
         set_tests_properties(device_count_${count} PROPERTIES ENVIRONMENT "FAKE_CUDA_DEVICE_COUNT=${count}")
@@ -94,8 +106,10 @@ if(BUILD_TESTING)
     add_test(NAME device_profile_synthetic COMMAND device_profile_contract 4 synthetic)
     set_tests_properties(device_profile_synthetic PROPERTIES ENVIRONMENT
         "FAKE_CUDA_DEVICE_COUNT=4;FAKE_CUDA_PROFILE=${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic.profile")
-    find_package(Python3 COMPONENTS Interpreter QUIET)
+    find_package(Python3 3.10 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME coordinator_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/coordinator_contract.py")
+        add_test(NAME cache_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/cache_contract.py")
         add_test(NAME probe_contract COMMAND "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/tests/unit/probe_contract.py"
             "$<TARGET_FILE:replay_probe>" "${PROJECT_SOURCE_DIR}/tests/integration/tooling/probe_ncu.py")

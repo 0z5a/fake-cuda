@@ -138,4 +138,29 @@ int main(int argc, char **argv) {
                     run.timing.simulator_run_time->count()/1e6);
     };
     row(100, warm); row(10000, cold);
+    // A pending cross-device event must not create an artificial compute edge.
+    std::vector<ReplayInvocation> ready_trace{
+        {{context1, 1, &profile, &launch, LaunchMode::eager, 31}, 1, 0ns, 0ns, {}},
+        {{context0, 0, &profile, &launch, LaunchMode::eager, 32}, 1, 0ns, 0ns, {31}},
+        {{context0, 0, &profile, &launch, LaunchMode::eager, 33}, 2, 0ns, 0ns, {}}};
+    const std::array ready_costs{100ms, 10ms, 20ms};
+    samples.clear();
+    for (size_t i = 0; i < ready_trace.size(); ++i) {
+        const auto &q = ready_trace[i].query;
+        samples.push_back({q.context, q.device, q.profile, *q.launch, q.mode,
+                          {ready_costs[i], TimingScope::kernel, IncludedCosts::device_service,
+                           ConfidenceKind::measured_replay, "synthetic resource oracle"}});
+    }
+    Oracle reserved(samples), ready_model(samples), slow_ready(samples);
+    slow_ready.delay = 10ms;
+    auto before = replay_kernel_trace(reserved, ready_trace);
+    auto after = replay_resource_trace(ready_model, ready_trace);
+    auto delayed = replay_resource_trace(slow_ready, ready_trace);
+    CHECK(before.makespan == 130ms && after.makespan == 110ms && delayed.makespan == after.makespan);
+    CHECK(after.intervals[2].start == 0ns && after.intervals[2].completion == 20ms);
+    CHECK(after.intervals[1].start == 100ms && after.intervals[1].completion == 110ms);
+    CHECK(after.timing.service_time == before.timing.service_time && ready_model.replay.consumed() == 3);
+    Oracle bad_ready(samples); bad_ready.fault = 1;
+    CHECK(!replay_resource_trace(bad_ready, ready_trace).error.empty() && bad_ready.replay.consumed() == 0);
+    std::puts("PASS: core predictor -> ready ResourceEngine, blocked-operation overtaking and query-delay invariance");
 }

@@ -24,5 +24,8 @@ struct KernelReplayResult {
     std::string error;
 };
 KernelReplayResult replay_kernel_trace(PerformanceModel &model, std::span<const ReplayInvocation> trace);
+// Same fixed trace and conservative one-kernel/device admission, but resource
+// order follows dependency readiness rather than future submission reservations.
+KernelReplayResult replay_resource_trace(PerformanceModel &model, std::span<const ReplayInvocation> trace);
 } // namespace fake_cuda
 #endif
