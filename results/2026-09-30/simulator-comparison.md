@@ -1,10 +1,11 @@
 # Comparison with published simulators
 
-The current 3.654% MAPE measures reuse of frozen durations on 27 independent observations of nine previously calibrated kernel/configuration keys. Two unseen shapes contribute nine unsupported observations. It does not establish parity with learned kernel predictors or end-to-end simulators. Other systems' numbers below are reported by their authors; these systems were not run head-to-head in this experiment.
+The kernel experiment's 3.654% MAPE measures reuse of frozen durations on 27 independent observations of nine previously calibrated kernel/configuration keys. Two unseen shapes contribute nine unsupported observations. It does not establish parity with learned kernel predictors or end-to-end simulators. Other systems' numbers below are reported by their authors; these systems were not run head-to-head in this experiment.
 
 | System | Prediction and validation scope | Reported result | Difference from this iteration |
 |---|---|---|---|
-| FakeCUDA | Frozen kernel durations on one RTX 5090 and fixed input seed | MAPE 3.654%, P95 APE 13.746%; coverage 27/36, unseen-shape coverage 0/9 | Independent same-configuration validation; no cross-shape model or serving-latency validation |
+| FakeCUDA kernel probe | Frozen kernel durations on one RTX 5090 and fixed input seed | MAPE 3.654%, P95 APE 13.746%; coverage 27/36, unseen-shape coverage 0/9 | Independent same-configuration kernel validation |
+| FakeCUDA serving U1 | Original vLLM 0.30 Scheduler/KV; frozen whole-step interpolation or native AIS regression, A100 Qwen2.5-0.5B TP1 | WAPE 0.51% / 0.63%; median TTFT/ITL within 10% for 18/18; measured-candidate regret 0%; complete CPU process 1.121× faster | Controlled oracle/completion boundary, narrow same-hardware/shape domain; full process timing includes imports/fit/teardown |
 | Maya v2 | Random-forest kernel predictors and distributed training simulation | H100 GEMM MAPE 3.65% and 2.22%; end-to-end runtime error reported below 5% | Random 80:20 kernel train/test split; about 42k training points for heavy-hitter kernels, plus complete execution/dependency modeling |
 | Revati v1 | Real vLLM/SGLang control flow with coordinated virtual time; three model configurations | TTFT/TPOT median prediction error below 5%; 5–17× execution speedup over real GPU runs | Serving distributions and causality are evaluated, rather than isolated kernel durations |
 | SGLang #33824 | Real scheduler/cache/request lifecycle with AIC, ML or batch replay forward-latency prediction | Qwen3-8B TTFT errors 2.38–4.15%; four long-context traces have mean-TTFT MAPE 5.89% | Forward and serving metrics, cache behavior and logical-time execution are integrated |
@@ -16,10 +17,10 @@ These percentages cannot be ranked as one benchmark. Maya also reports large rel
 
 The useful distinction is architectural. FakeCUDA retains Driver calls, compiled-image evidence and kernel accounting as its foundation. SGLang replaces model forward execution while preserving its own scheduler and cache. Maya adds trace collation and learned operation timing; Revati coordinates live actors' virtual time. Accel-Sim models execution below the kernel boundary. A low-level interface alone does not establish broader validated coverage.
 
-## Next comparable experiments
+## Comparable experiments and remaining scope
 
 1. Separate calibration and validation by shape, not merely by process. Report MAPE, duration-weighted error, tail error and unsupported coverage together; keep hardware and compiled-code identities explicit.
 2. Replay the same complete workload trace with measured kernel durations and then with predicted durations. The first experiment tests scheduling/accounting fidelity; the second adds predictor error. Include host, transfer and synchronization costs.
-3. After integrating real request scheduling, compare TTFT, TPOT, throughput and simulator wall time on matched hardware/model/workload settings. Keep predictor query wall time outside target-system time.
+3. The new [serving campaign](serving-validation.md) now measures original scheduling, TTFT/ITL, throughput and regret on independent native workloads. [Complete-process timing](serving-speed.md) measures before/after simulator execution; native-to-simulator reuse ratios are reported separately. Broader models, hardware/topology holdouts and matched runs of the external simulators remain unmeasured.
 
-These are future validation steps, not completed results. This submission establishes the probe/evidence path and independent same-configuration timing evaluation.
+The first two experiments and broader head-to-head validation remain future scope. The serving experiment closes the bounded U1 path; it does not establish parity with the external systems' broader validation domains.
