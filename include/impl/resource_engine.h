@@ -4,6 +4,7 @@
 #include "perf_model.h"
 
 #include <map>
+#include <set>
 
 namespace fake_cuda {
 // Capacities and demands use the same units; rates are units/ns. Resident
@@ -49,6 +50,7 @@ private:
     void rates();
     std::vector<ResourceCapacity> capacities_;
     std::map<std::uint64_t, Entry> work_;
+    std::set<std::uint64_t> unfinished_;
     Nanoseconds now_{};
 };
 

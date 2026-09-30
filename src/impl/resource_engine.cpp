@@ -27,15 +27,18 @@ void ResourceEngine::submit(ResourceWork work) {
     }
     const auto id = work.id;
     work_.emplace(id, Entry{std::move(work), {}});
+    unfinished_.insert(id);
     settle();
 }
 void ResourceEngine::settle() {
-    for (auto &[id, e] : work_) {
+    for (auto it = unfinished_.begin(); it != unfinished_.end();) {
+        auto &e = work_.at(*it);
         auto &p = e.progress;
         if (p.state == WorkState::running && p.token.deadline <= now_) {
             if (++p.phase == e.work.phases.size()) {
                 p.state = WorkState::completed;
                 p.completion = now_;
+                p.rate = 0;
                 p.token.completed = true;
                 p.token.deadline.reset();
                 ++p.token.generation;
@@ -44,12 +47,17 @@ void ResourceEngine::settle() {
                 p.remaining = 1;
             }
         }
+        if (p.state == WorkState::completed) it = unfinished_.erase(it);
+        else ++it;
     }
     std::vector<std::uint64_t> used(capacities_.size());
-    for (const auto &[id, e] : work_)
+    for (auto id : unfinished_) {
+        const auto &e = work_.at(id);
         if (e.progress.state == WorkState::running)
             for (size_t r = 0; r < used.size(); ++r) used[r] += e.work.phases[e.progress.phase].resident[r];
-    for (auto &[id, e] : work_) {
+    }
+    for (auto id : unfinished_) {
+        auto &e = work_.at(id);
         auto &p = e.progress;
         if (p.state == WorkState::pending && e.work.arrival <= now_ &&
             std::all_of(e.work.dependencies.begin(), e.work.dependencies.end(), [&](auto dep) {
@@ -72,11 +80,14 @@ void ResourceEngine::settle() {
 }
 void ResourceEngine::rates() {
     std::vector<Entry *> active;
-    std::map<std::uint64_t, long double> previous;
-    for (auto &[id, e] : work_) {
-        previous[id] = e.progress.rate;
-        e.progress.rate = 0;
-        if (e.progress.state == WorkState::running) active.push_back(&e);
+    std::vector<long double> previous;
+    for (auto id : unfinished_) {
+        auto &e = work_.at(id);
+        if (e.progress.state == WorkState::running) {
+            active.push_back(&e);
+            previous.push_back(e.progress.rate);
+            e.progress.rate = 0;
+        }
     }
     std::vector<bool> free(active.size(), true);
     size_t remaining = active.size();
@@ -111,11 +122,12 @@ void ResourceEngine::rates() {
         if (!frozen) throw std::logic_error("resource allocation made no progress");
         remaining -= frozen;
     }
-    for (auto *e : active) {
+    for (size_t i = 0; i < active.size(); ++i) {
+        auto *e = active[i];
         auto &p = e->progress;
         const auto cap = 1.L / e->work.phases[p.phase].isolated_service.count();
         if (std::abs(p.rate - cap) <= 32 * std::numeric_limits<long double>::epsilon() * cap) p.rate = cap;
-        if (p.rate == previous.at(e->work.id) && p.token.deadline && *p.token.deadline > now_) continue;
+        if (p.rate == previous[i] && p.token.deadline && *p.token.deadline > now_) continue;
         auto duration = p.remaining / p.rate;
         const auto integer = std::round(duration);
         const auto tolerance = std::min(1e-6L, 32 * std::numeric_limits<long double>::epsilon() * std::max(1.L, duration));
@@ -130,7 +142,8 @@ void ResourceEngine::rates() {
 std::optional<Nanoseconds> ResourceEngine::next_event() const {
     std::optional<Nanoseconds> next;
     auto include = [&](Nanoseconds t) { if (!next || t < *next) next = t; };
-    for (const auto &[id, e] : work_) {
+    for (auto id : unfinished_) {
+        const auto &e = work_.at(id);
         if (e.progress.state == WorkState::pending && e.work.arrival > now_) include(e.work.arrival);
         if (e.progress.state == WorkState::running) include(*e.progress.token.deadline);
     }
@@ -141,8 +154,11 @@ void ResourceEngine::advance_to(Nanoseconds target) {
     while (now_ < target) {
         const auto next = next_event();
         const auto time = next ? std::min(target, *next) : target;
-        for (auto &[id, e] : work_) if (e.progress.state == WorkState::running)
-            e.progress.remaining = std::max(0.L, e.progress.remaining - e.progress.rate * (time - now_).count());
+        for (auto id : unfinished_) {
+            auto &p = work_.at(id).progress;
+            if (p.state == WorkState::running)
+                p.remaining = std::max(0.L, p.remaining - p.rate * (time - now_).count());
+        }
         now_ = time;
         settle();
     }
