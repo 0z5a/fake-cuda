@@ -4,6 +4,8 @@ The previous nine probe durations were frozen before collecting **24 new NCU rep
 
 This tests same-configuration prediction from an earlier measurement. It is not the earlier in-sample replay equality check, a learned cross-shape predictor, or full-workload latency accuracy. The runtime remains unchanged from `b8b516f`; the new generic evaluator scores independently captured artifacts offline.
 
+See the [comparison with Maya, Revati, SGLang and Accel-Sim](simulator-comparison.md) for differences in prediction scope, datasets and metrics.
+
 ## Protocol
 
 - Hardware/environment: gongji GPU 0, RTX 5090, UUID `GPU-a015762a-f0d5-9065-109d-37898af80ecf`, driver 580.82.07, existing `0z5a` Python/PyTorch environment and NCU 2025.3.1. GPU 0 was idle before the experiment and returned to 0 MiB/0% afterwards. Other GPUs' services were left running.
