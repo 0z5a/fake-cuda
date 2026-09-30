@@ -112,6 +112,17 @@ The default capture uses the third matching launch per launch configuration, ker
 
 `replay_probe` feeds each observation through `PerformanceModel`, coverage validation and `replay_kernel_trace`, comparing the default 10 ms with the captured service time. Its provider is confined to that observation; unknown parameter contents remain unknown, and it does not match future launches by symbol. Every observation is replayed independently from zero with host work excluded. NCU's selected samples do not establish arrival times, full stream/event dependencies, transfers or a whole-workload makespan. Resources and provenance remain in the artifact; no occupancy multiplier is applied to measured duration. [Local capture-to-replay validation and research rationale](results/2026-09-30/probe-replay.md).
 
+For an independent accuracy check, freeze calibration captures before collecting validation reports, then use `tests/integration/tooling/evaluate_probe.py`:
+
+```sh
+python tests/integration/tooling/evaluate_probe.py --replay /absolute/path/build/replay_probe \
+  --conditions 'audited same input seed, compiler, GPU and profiling settings' \
+  --calibration /absolute/path/calibration/kernels.probe \
+  --validation /absolute/path/validation-1/kernels.probe /absolute/path/validation-2/kernels.probe
+```
+
+The evaluator checks report/hardware/manifest digests and disjoint report identities. It freezes calibration medians by code, hardware, device, symbol, grid/block and resource metadata; unmatched validation configurations are unsupported. It reports coverage alongside MAPE, nearest-rank P95 absolute percentage error, maximum error, WAPE and signed bias. Input contents and operating-condition equivalence require the caller's audit because the probe does not capture argument values. This is an offline test of frozen-duration reuse, not a live runtime cache or cross-shape predictor. [Independent accuracy results](results/2026-09-30/prediction-accuracy.md).
+
 ## Build and try it
 
 On Linux aarch64, install `uv`, CMake, a C/C++ compiler, Python 3.12 and Docker with a local `ubuntu:24.04` image. The setup script installs separate PyTorch CUDA 12.8 and 13.0 environments (several GB of downloads); CUDA 13 headers from the latter are required to build.
@@ -136,6 +147,8 @@ The PyTorch probes run in Docker with no GPU devices and no network; `all` check
 ## Debugging findings
 
 - **Compiled identity and profiling scope:** Native inspection on RTX 5090 found attention variants with identical symbols, parameter layouts and launch dimensions but different cubin hashes and local-memory usage. The generated PTX also identifies a different compiler from system `nvcc`. Preserve the actual compiled artifact, verified parameter ABI and measurement conditions when binding timing samples. NCU's kernel durations must be kept separate from host/event intervals collected under its instrumentation. The generic `tests/integration/tooling/inspect_compiled_kernel.py` reads real-Driver function resources and parameter offsets from a supplied cubin. [Compilation evidence, nine kernel profiles and unprofiled speed comparisons](results/2026-09-30/compiled-kernel-profile.md).
+
+- **Independent timing accuracy:** Reusing nine frozen probe durations against 27 new same-configuration observations gave 3.654% MAPE, but one quantization configuration underpredicted all three new measurements by 13.15–14.92%. Single-sample calibration is not uniformly reliable. Nine held-out-shape observations were unsupported; report that coverage separately from conditional error and do not refit on validation data. [Independent accuracy protocol and results](results/2026-09-30/prediction-accuracy.md).
 
 These are conclusions from observed failures and targeted probes, not a claim of full CUDA compatibility:
 

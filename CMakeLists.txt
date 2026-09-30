@@ -99,6 +99,9 @@ if(BUILD_TESTING)
         add_test(NAME probe_contract COMMAND "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/tests/unit/probe_contract.py"
             "$<TARGET_FILE:replay_probe>" "${PROJECT_SOURCE_DIR}/tests/integration/tooling/probe_ncu.py")
+        add_test(NAME probe_accuracy_contract COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tests/unit/probe_accuracy_contract.py"
+            "$<TARGET_FILE:replay_probe>" "${PROJECT_SOURCE_DIR}/tests/integration/tooling/evaluate_probe.py")
         add_test(NAME device_profile_inputs COMMAND "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/tests/unit/device_profile_inputs.py"
             "$<TARGET_FILE:device_profile_contract>" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic.profile")
