@@ -138,7 +138,7 @@ def main() -> None:
             med = [statistics.median(column) for column in zip(*rows)]
             print(f"| {name} | {workload} | {sequences} | {med[0]:.3f} | {med[2]:.3f} | {med[3]:.2f}× | " + " | ".join(f"{error:+.2f}%" for error in med[5:]) + " |")
         print("\nCPU workload wall time includes original scheduling, oracle, predictor and bridge IPC/startup/teardown. Reuse speedup excludes prior downloads/calibration and process imports; it is a timing simulation speedup, not numerical inference acceleration. Reported rows are medians of three runs. Tail percentiles use linear interpolation of all request TTFTs and token intervals in each run; three repeats under shared host load do not establish confidence bounds.\n")
-        print("| Predictor | Held-out step coverage | Conditional WAPE | Conditional MAPE | Completed workloads | ≤10% duration / throughput / TTFT / ITL / P95 TTFT / P95 ITL |\n|---|---:|---:|---:|---:|---| ")
+        print("| Predictor | Held-out step coverage | Conditional WAPE | Conditional MAPE | Completed workloads | ≤10% duration / throughput / TTFT / ITL / P95 TTFT / P95 ITL |\n|---|---:|---:|---:|---:|---|")
         for name, (covered, total, absolute, observed, percentage) in coverage.items():
             print(f"| {name} | {int(covered)}/{int(total)} | {100*absolute/observed:.2f}% | {100*percentage/covered:.2f}% | {complete[name]}/{len(validation)} | " + " / ".join(f"{hit}/{complete[name]}" for hit in hits[name]) + " |")
         print("\n| Workload | Previous core CPU s | Optimized core CPU s | End-to-end simulator speedup |\n|---|---:|---:|---:|")

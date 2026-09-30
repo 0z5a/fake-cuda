@@ -22,7 +22,7 @@ Calibration: 24 separate runs, batch 1/8/16/32, prompt 32/64/128, output 96. Bot
 CPU workload wall time includes original scheduling, oracle, predictor and bridge IPC/startup/teardown. Reuse speedup excludes prior downloads/calibration and process imports; it is a timing simulation speedup, not numerical inference acceleration. Reported rows are medians of three runs. Tail percentiles use linear interpolation of all request TTFTs and token intervals in each run; three repeats under shared host load do not establish confidence bounds.
 
 | Predictor | Held-out step coverage | Conditional WAPE | Conditional MAPE | Completed workloads | ≤10% duration / throughput / TTFT / ITL / P95 TTFT / P95 ITL |
-|---|---:|---:|---:|---:|---| 
+|---|---:|---:|---:|---:|---|
 | measured-step | 9408/9408 | 0.51% | 0.49% | 18/18 | 18/18 / 18/18 / 18/18 / 18/18 / 18/18 / 18/18 |
 | AIS regression | 9408/9408 | 0.63% | 0.61% | 18/18 | 18/18 / 18/18 / 18/18 / 18/18 / 18/18 / 18/18 |
 
