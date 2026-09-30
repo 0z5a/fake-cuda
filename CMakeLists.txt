@@ -63,6 +63,10 @@ target_link_options(fake_cuda PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(replay_probe tests/integration/tooling/replay_probe.cpp)
+    target_compile_features(replay_probe PRIVATE cxx_std_23)
+    target_link_libraries(replay_probe PRIVATE fake_cuda_objects)
+    set_target_properties(replay_probe PROPERTIES CXX_EXTENSIONS OFF)
     foreach(tool IN ITEMS capture_device_profile driver_graph_contract)
         add_executable(${tool} "tests/integration/tooling/${tool}.cpp")
         target_compile_features(${tool} PRIVATE cxx_std_23)
@@ -92,6 +96,9 @@ if(BUILD_TESTING)
         "FAKE_CUDA_DEVICE_COUNT=4;FAKE_CUDA_PROFILE=${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic.profile")
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME probe_contract COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tests/unit/probe_contract.py"
+            "$<TARGET_FILE:replay_probe>" "${PROJECT_SOURCE_DIR}/tests/integration/tooling/probe_ncu.py")
         add_test(NAME device_profile_inputs COMMAND "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/tests/unit/device_profile_inputs.py"
             "$<TARGET_FILE:device_profile_contract>" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic.profile")
