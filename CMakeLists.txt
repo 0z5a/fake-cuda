@@ -25,6 +25,7 @@ add_library(fake_cuda_objects OBJECT
     src/driver_api/cu13.c
     src/impl/kernel_launch.cpp
     src/impl/perf_model.cpp
+    src/impl/kernel_replay.cpp
     src/impl/replay_file.cpp
     src/impl/device_profile.cpp
     src/impl/core.cpp
@@ -69,7 +70,7 @@ if(BUILD_TESTING)
         target_link_libraries(${tool} PRIVATE ${CMAKE_DL_LIBS})
         set_target_properties(${tool} PROPERTIES CXX_EXTENSIONS OFF)
     endforeach()
-    foreach(contract IN ITEMS device_profile_contract device_system_contract launch_metadata_contract perf_model_contract replay_file_contract)
+    foreach(contract IN ITEMS device_profile_contract device_system_contract launch_metadata_contract perf_model_contract replay_file_contract kernel_replay_contract)
         add_executable(${contract} "tests/unit/${contract}.cpp")
         target_compile_features(${contract} PRIVATE cxx_std_23)
         target_link_libraries(${contract} PRIVATE fake_cuda_objects)
@@ -81,6 +82,7 @@ if(BUILD_TESTING)
     add_test(NAME launch_metadata_contract COMMAND launch_metadata_contract)
     add_test(NAME perf_model_contract COMMAND perf_model_contract)
     add_test(NAME replay_file_contract COMMAND replay_file_contract "${PROJECT_SOURCE_DIR}/tests/fixtures/kernel.timing")
+    add_test(NAME kernel_replay_contract COMMAND kernel_replay_contract "${PROJECT_SOURCE_DIR}/tests/fixtures/kernel.timing")
     foreach(count IN ITEMS 1 2 4 8 16 24 32 257)
         add_test(NAME device_count_${count} COMMAND device_profile_contract ${count})
         set_tests_properties(device_count_${count} PROPERTIES ENVIRONMENT "FAKE_CUDA_DEVICE_COUNT=${count}")

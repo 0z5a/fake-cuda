@@ -29,6 +29,7 @@ struct PredictorResult {
     ConfidenceKind confidence = ConfidenceKind::synthetic;
     std::string source;
     std::optional<MeasurementIdentity> measurement{};
+    std::uint64_t covered_invocation = 0;
     bool supported() const;
 };
 PredictorResult synthetic_kernel_prediction();
@@ -39,11 +40,13 @@ struct KernelQuery {
     const DeviceProfile *profile;
     const KernelLaunch *launch;
     LaunchMode mode;
+    std::uint64_t invocation_id = 0;
 };
 struct PredictionBatch {
     std::vector<PredictorResult> results;
     std::string unsupported_reason;
 };
+std::string validate_predictions(std::span<const KernelQuery> queries, const PredictionBatch &batch);
 class PerformanceModel {
 public:
     virtual ~PerformanceModel() = default;
@@ -80,9 +83,11 @@ private:
 struct TimingLedger {
     // Sum of committed kernel service costs, not makespan or transfer time.
     Nanoseconds service_time{};
-    // No target-host CPU model yet; unknown must not be recorded as zero.
+    // Explicit host-service sum for trace replay; unknown in the paced Driver.
     std::optional<Nanoseconds> host_time;
     Nanoseconds simulator_query_time{};
+    // Populated by a bounded replay run, not by the paced Driver path.
+    std::optional<Nanoseconds> simulator_run_time;
 };
 } // namespace fake_cuda
 #endif

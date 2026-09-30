@@ -46,7 +46,8 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
         const auto &node = nodes_[i].node;
         if (node.kind != Kind::kernel) continue;
         prediction_index[i] = queries.size();
-        queries.push_back({ctx, device->ordinal(), &device->profile(), node.launch.get(), LaunchMode::graph_replay});
+        queries.push_back({ctx, device->ordinal(), &device->profile(), node.launch.get(),
+                           LaunchMode::graph_replay, s.new_invocation()});
     }
     std::vector<PredictorResult> predictions;
     CUresult status = s.predict(queries, predictions);

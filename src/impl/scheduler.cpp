@@ -20,11 +20,7 @@ CUresult Scheduler::predict(std::span<const KernelQuery> queries, std::vector<Pr
     const auto start = VirtualClock::now();
     auto batch = performance_model->predict(queries);
     timing.simulator_query_time += std::chrono::duration_cast<Nanoseconds>(VirtualClock::now() - start);
-    prediction_error = std::move(batch.unsupported_reason);
-    if (prediction_error.empty() && batch.results.size() != queries.size())
-        prediction_error = "predictor result count mismatch";
-    for (const auto &prediction : batch.results)
-        if (!prediction.supported()) prediction_error = "unsupported timing scope, costs or duration";
+    prediction_error = validate_predictions(queries, batch);
     if (!prediction_error.empty()) return CUDA_ERROR_NOT_SUPPORTED;
     results = std::move(batch.results);
     return CUDA_SUCCESS;
@@ -54,7 +50,7 @@ CUresult Scheduler::enqueue(Key key, Node node, OpPtr *result) {
     if (node.kind == Kind::kernel) {
         const CUdevice device = queue.device_for(key.context);
         const KernelQuery query{key.context, device, &virtual_core_device(device)->profile(),
-                                node.launch.get(), LaunchMode::eager};
+                                node.launch.get(), LaunchMode::eager, new_invocation()};
         const CUresult status = predict(std::span(&query, 1), predictions);
         if (status != CUDA_SUCCESS) return status;
     }

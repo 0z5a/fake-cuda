@@ -1,6 +1,7 @@
 #include "impl/perf_model.h"
 
 #include <limits>
+#include <set>
 
 namespace fake_cuda {
 bool PredictorResult::supported() const {
@@ -14,7 +15,26 @@ PredictorResult synthetic_kernel_prediction() {
             ConfidenceKind::synthetic, "synthetic_constant_v1"};
 }
 PredictionBatch SyntheticConstant::predict(std::span<const KernelQuery> queries) const {
-    return {std::vector<PredictorResult>(queries.size(), synthetic_kernel_prediction()), {}};
+    PredictionBatch batch;
+    for (const auto &query : queries) {
+        auto prediction = synthetic_kernel_prediction();
+        prediction.covered_invocation = query.invocation_id;
+        batch.results.push_back(std::move(prediction));
+    }
+    return batch;
+}
+std::string validate_predictions(std::span<const KernelQuery> queries, const PredictionBatch &batch) {
+    if (!batch.unsupported_reason.empty()) return batch.unsupported_reason;
+    if (batch.results.size() != queries.size()) return "predictor result count mismatch";
+    std::set<std::uint64_t> covered;
+    for (size_t i = 0; i < queries.size(); ++i) {
+        const auto &prediction = batch.results[i];
+        if (!prediction.supported()) return "unsupported timing scope, costs or duration";
+        if (!queries[i].invocation_id || prediction.covered_invocation != queries[i].invocation_id ||
+            !covered.insert(prediction.covered_invocation).second)
+            return "kernel invocation coverage mismatch";
+    }
+    return {};
 }
 PredictionBatch MeasuredReplay::predict(std::span<const KernelQuery> queries) const {
     if (cursor_ > samples_.size() || queries.size() > samples_.size() - cursor_)
@@ -42,6 +62,7 @@ PredictionBatch MeasuredReplay::predict(std::span<const KernelQuery> queries) co
         if (!sample.timing.supported() || sample.timing.confidence != ConfidenceKind::measured_replay)
             return {{}, "invalid measured service-time accounting"};
         batch.results.push_back(sample.timing);
+        batch.results.back().covered_invocation = query.invocation_id;
     }
     return batch;
 }

@@ -19,11 +19,19 @@ using namespace std::chrono_literals;
 class DelayedModel final : public PerformanceModel {
 public:
     Nanoseconds delay{};
+    int coverage_fault = 0;
     PredictorResult result{7ms, TimingScope::kernel, IncludedCosts::device_service,
                            ConfidenceKind::synthetic, "contract-only"};
     PredictionBatch predict(std::span<const KernelQuery> queries) const override {
         std::this_thread::sleep_for(delay);
-        return {std::vector<PredictorResult>(queries.size(), result), {}};
+        PredictionBatch batch;
+        for (const auto &query : queries) {
+            batch.results.push_back(result);
+            batch.results.back().covered_invocation = query.invocation_id;
+            if (coverage_fault == 1) batch.results.back().covered_invocation = 0;
+            if (coverage_fault == 2) batch.results.back().covered_invocation = queries.front().invocation_id;
+        }
+        return batch;
     }
 };
 
@@ -51,6 +59,7 @@ int main() {
     auto original = last();
     CHECK(original->end - original->start == 10ms);
     CHECK(original->prediction->source == "synthetic_constant_v1");
+    CHECK(original->prediction->covered_invocation != 0);
     CHECK(!s.timing.host_time.has_value());
     auto sample = [&](LaunchMode mode, Nanoseconds duration) {
         return ReplaySample{context, 0, &device->profile(), *original->launch, mode,
@@ -70,6 +79,7 @@ int main() {
     scalar = 17;
     OK(launch());
     CHECK(last()->end - last()->start == 7ms && replay->consumed() == 1);
+    CHECK(last()->prediction->covered_invocation != original->prediction->covered_invocation);
 
     CUgraph graph; CUgraphExec exec;
     OK(virtual_stream_begin_capture(stream, CU_STREAM_CAPTURE_MODE_GLOBAL));
@@ -95,6 +105,7 @@ int main() {
     OK(virtual_graph_launch(exec, stream));
     CHECK(last()->end - last()->start == 19ms);
     CHECK(last()->start >= first_replay->end && replay->consumed() == 5);
+    CHECK(last()->prediction->covered_invocation != first_replay->prediction->covered_invocation);
     CHECK(s.timing.service_time - charged == 60ms);
     const auto completed = device->compute_queue.available_at();
     CHECK(virtual_graph_launch(exec, stream) == CUDA_ERROR_NOT_SUPPORTED);
@@ -159,6 +170,14 @@ int main() {
     CHECK(s.timing.service_time - service_time == 7ms);
     CHECK(s.timing.simulator_query_time - query_time >= 20ms);
     CHECK(!s.timing.host_time.has_value());
+    const auto accounted = s.timing.service_time;
+    const auto scheduled = device->compute_queue.available_at();
+    delayed->coverage_fault = 1;
+    CHECK(launch() == CUDA_ERROR_NOT_SUPPORTED);
+    delayed->coverage_fault = 2;
+    CHECK(virtual_graph_launch(exec, stream) == CUDA_ERROR_NOT_SUPPORTED);
+    CHECK(s.timing.service_time == accounted && device->compute_queue.available_at() == scheduled);
+    CHECK(s.prediction_error == "kernel invocation coverage mismatch");
     OK(virtual_graph_exec_destroy(exec));
     OK(virtual_module_unload(module));
     OK(core_context_destroy(context));
