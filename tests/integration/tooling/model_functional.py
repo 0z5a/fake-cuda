@@ -61,7 +61,8 @@ def native(args) -> None:
     import torch
     from vllm import LLM, SamplingParams
     from vllm.config import CUDAGraphMode
-    from vllm.distributed.parallel_state import get_world_group
+    from vllm.distributed.parallel_state import (
+        destroy_distributed_environment, destroy_model_parallel, get_world_group)
     from vllm.sampling_params import RequestOutputKind
     from vllm.v1.engine.core import resolve_kv_cache_block_sizes
     if args.tp > 1 and args.native_rank is None:
@@ -192,12 +193,17 @@ def native(args) -> None:
                 "scope": "native_complete_checkpoint_functional; shared_host; no_speedup_qualification"}
     if args.tp > 1:
         digests = [""] * args.tp
-        payload = [(r["case"], r["token_ids"], [(s["items"], s["samples"]) for s in r["steps"]]) for r in records]
+        payload = {"records": [(r["case"], r["token_ids"], [(s["items"], s["samples"]) for s in r["steps"]])
+                               for r in records], "examples": document["examples"]}
         torch.distributed.all_gather_object(digests, hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
                                              group=get_world_group().cpu_group)
         assert len(set(digests)) == 1
     (args.evidence / f"rank-{rank}-native.json").write_text(json.dumps(document, sort_keys=True))
     core.shutdown()
+    if args.tp > 1:
+        torch.distributed.barrier(group=get_world_group().cpu_group)
+    destroy_model_parallel()
+    destroy_distributed_environment()
 
 
 def replay(args) -> None:
@@ -307,17 +313,25 @@ def verify(args) -> None:
                     differences.append({"case": expected["case"]["name"], "request": rid,
                                         "first_different_token": index, "eager": a, "chunk": b})
                     break
+    reference_differences = []
     if reference_path.exists():
         reference_document = json.loads(reference_path.read_text())
         assert not reference_document["cuda_initialized"]
-        for expected, observed in zip(reference_document["examples"], baseline["examples"], strict=True):
+        for example, (expected, observed) in enumerate(zip(reference_document["examples"], baseline["examples"], strict=True)):
             assert expected["prompt_token_ids"] == observed["prompt_token_ids"]
-            assert expected["token_ids"] == observed["token_ids"]
+            left, right = expected["token_ids"], observed["token_ids"]
+            if left != right:
+                index = next((i for i, (a, b) in enumerate(zip(left, right)) if a != b), min(len(left), len(right)))
+                reference_differences.append({"example": example, "first_different_token": index,
+                                              "reference": left[index:], "native": right[index:]})
     (args.evidence / "comparison.json").write_text(json.dumps({"graph_matched_policy_exact": True,
-        "natural_examples_all_variants_exact": True, "independent_reference_verified": reference_path.exists(),
+        "natural_examples_all_variants_exact": True, "independent_reference_present": reference_path.exists(),
+        "independent_reference_verified": reference_path.exists() and not reference_differences,
+        "independent_reference_differences": reference_differences,
         "cross_prefill_policy_differences": differences}, sort_keys=True))
-    print("PASS matched-policy Graph parity, original scheduler replay and available independent reference")
+    print("PASS matched-policy Graph parity and original scheduler replay")
     print("Cross-prefill-policy exact-token differences:", differences)
+    assert not reference_differences, reference_differences
 
 
 def matrix(args) -> None:
@@ -396,6 +410,21 @@ def reference_trace(args) -> None:
                    "cpu_top1_minus_top2": (top.values[0] - top.values[1]).item()}
             rows.append(row)
             print(row, flush=True)
+    baseline = json.loads((args.evidence / "eager" / "rank-0-native.json").read_text())
+    for difference in comparison.get("independent_reference_differences", []):
+        example = baseline["examples"][difference["example"]]
+        index = difference["first_different_token"]
+        sequence = example["prompt_token_ids"] + example["token_ids"][:index]
+        selected = example["token_ids"][index]
+        with torch.inference_mode():
+            logits = model(torch.tensor([sequence]), use_cache=False).logits[0, -1].float()
+        top = torch.topk(logits, 2)
+        row = {**difference, "variant": "native-reference", "selected": selected,
+               "cpu_top1": top.indices[0].item(), "cpu_top2": top.indices[1].item(),
+               "cpu_top1_minus_selected": (top.values[0] - logits[selected]).item(),
+               "cpu_top1_minus_top2": (top.values[0] - top.values[1]).item()}
+        rows.append(row)
+        print(row, flush=True)
     assert not torch.cuda.is_initialized()
     (args.evidence / "cpu-trace-diagnostic.json").write_text(json.dumps({"rows": rows,
         "scope": "independent_CPU_teacher_forcing_diagnostic; not_native_logit_error", "cuda_initialized": False}, sort_keys=True))
