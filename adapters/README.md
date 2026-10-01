@@ -43,6 +43,24 @@ Retain the matching native `device-0.profile` in that directory and verify the c
 
 The first comparison scores duration, throughput, median/P95 TTFT and ITL, unsupported coverage and regret only among measured max-sequence settings. The second alternates fresh-process order across three repeats and checks the digest of every target token/batch/arrival timeline, including imports, fit and natural teardown in wall time.
 
+## Independent rank processes
+
+`RankGroup(configurations, processes=True)` places each original Scheduler/KV manager in its own CPU process. Pass it as `ranks=` to `run`; reuse it for a sweep and call `close()` afterward. Every run resets scheduler/KV/control state under a new epoch. Replies carry epoch, sequence and virtual time; all ranks reply before safe-point certification. Transport latency is simulator wall time. Closing pipes delivers EOF; workers are joined without termination signals.
+
+```sh
+/path/to/vllm-python tests/integration/tooling/rank_campaign.py \
+  --evidence /path/to/evidence --config-sha256 TRUSTED_SHA256 \
+  --bridge /path/to/resource_engine_bridge
+
+/path/to/vllm-python tests/integration/tooling/benchmark_rank_campaign.py \
+  --evidence /path/to/evidence --config-sha256 TRUSTED_SHA256 \
+  --bridge /path/to/resource_engine_bridge --limit 3
+```
+
+The campaign compares every process-backed timeline against its local original-scheduler oracle. The benchmark compares rank startup per workload with explicit epoch reuse, including complete fresh-interpreter startup/fit/IPC/teardown in both modes. [Process correctness, retained prediction accuracy and measured speed](../results/2026-10-01/rank-execution.md).
+
+Native collection accepts `--tp 2` using one externally launched original vLLM engine per GPU, synchronized admissions and a native batch/token-count consistency check. `--transport socket` explicitly disables NCCL P2P/SHM and custom all-reduce; record it as a distinct calibration condition. These options add a collection path, not a validated TP2 predictor: the current machine has not completed native TP2 calibration/validation. The AIS regression remains qualified for TP1 only.
+
 ## Contracts
 
 The ordinary CMake contracts require no framework packages. On machines where processes must never be killed, run their registered commands without CTest's timeout machinery:
@@ -55,7 +73,7 @@ The following integration tools use the same `--config`, `--config-sha256` and `
 
 | Tool | Additional argument | Checks |
 |---|---|---|
-| `vllm_scheduler_contract.py` | None | Single/dual rank, fixed-token producer reads, exact arrivals, slow-query invariance, paced/coordinated parity, wrong-scope rejection |
+| `vllm_scheduler_contract.py` | None | Single/dual rank, independent process/IPC-delay parity, run epochs, protocol failure, fixed-token reads, exact arrivals, paced/coordinated parity, wrong-scope rejection |
 | `kv_budget_contract.py` | None | Explicit Graph reservation changes layout-derived original KV block admission |
 | `epp_closed_loop_contract.py` | `--epp /path/to/native-epp` | Delayed queue snapshots, native filter/scores/picker and service-sensitive routes |
 | `dynamo_closed_loop_contract.py` | `--dynamo-python /path/to/ais-python` | Native bookings, delayed prefill/completion feedback, service-sensitive routes, zero final native loads |

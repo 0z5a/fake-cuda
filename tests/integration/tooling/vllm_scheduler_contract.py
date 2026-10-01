@@ -4,12 +4,14 @@ import hashlib
 from importlib.metadata import version
 from pathlib import Path
 import pickle
+import os
 import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.vllm.costs import Shape, StepModel, StepSample
 from adapters.vllm.runner import Workload, run
+from adapters.vllm.ranks import Command, Failure, RankGroup
 
 
 class DelayedModel(StepModel):
@@ -68,6 +70,34 @@ def main() -> None:
     assert paced.arrivals_observed_ns == list(delayed_arrivals.arrivals_ns)
     assert paced.finish_ns == coordinated.finish_ns == 16_000_000 and wall >= paced.finish_ns
     print("PASS paced/coordinated pair: complete token/batch parity, arrival during service, real waits preserved; registered actors only")
+    configs = [pickle.loads(data) for _ in range(2)]
+    for config, kv, block, hashed in configs:
+        config.parallel_config.tensor_parallel_size = 2
+    group = RankGroup(configs, processes=True, delay_s=.001)
+    try:
+        for repeat in range(2):
+            isolated = run(workload, configs, [StepModel(samples)] * 2, args.bridge, ranks=group)
+            assert isolated.tokens == reference.tokens and isolated.batch_ids == reference.batch_ids
+            assert isolated.arrivals_observed_ns == list(workload.arrivals_ns)
+            assert isolated.finish_ns == 8000 and isolated.control_reads == 320
+            assert len(isolated.rank_pids) == 2 and os.getpid() not in isolated.rank_pids
+            assert isolated.ipc_messages == 38
+        coordinated = run(delayed_arrivals, configs, [StepModel(timed)] * 2, args.bridge, ranks=group)
+        paced = run(delayed_arrivals, configs, [StepModel(timed)] * 2, args.bridge, paced=True, ranks=group)
+        assert paced.tokens == coordinated.tokens and paced.batch_ids == coordinated.batch_ids
+        assert paced.finish_ns == coordinated.finish_ns == 16_000_000
+        assert paced.arrivals_observed_ns == coordinated.arrivals_observed_ns
+        print("PASS independent rank processes: delayed IPC timestamp/batch/token parity, fresh run epochs, paced/coordinated parity, natural exit")
+    finally:
+        group.close()
+    group = RankGroup(configs[:1], processes=True)
+    try:
+        group.connections[0].send(Command(2, 0, 0, "arrive"))
+        failure = group.connections[0].recv()
+        assert isinstance(failure, Failure) and "invalid rank command sequence" in failure.message
+        print("PASS process protocol failure: stale/out-of-order command rejected, no certificate or output fabricated")
+    finally:
+        group.close()
 
 
 if __name__ == "__main__":

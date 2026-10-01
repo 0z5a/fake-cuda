@@ -4,14 +4,11 @@ from pathlib import Path
 import statistics
 
 import torch
-from vllm.config import VllmConfig
-from vllm.v1.kv_cache_interface import KVCacheConfig
 
 from adapters.common.bridge import ResourceBridge
-from adapters.common.clock import Coordinator, PacedCoordinator
-from adapters.common.control import ControlLedger
-from adapters.vllm.costs import StepCost
-from adapters.vllm.worker import add_request, complete_step, make_scheduler, scheduled_shape
+from adapters.common.clock import Coordinator, Event, PacedCoordinator
+from adapters.vllm.costs import Shape, StepCost
+from adapters.vllm.ranks import Configuration, Operation, RankGroup, Reply
 
 
 @dataclass(frozen=True)
@@ -30,6 +27,8 @@ class ServingResult:
     waiting: list[int]
     arrivals_observed_ns: list[int]
     control_reads: int
+    rank_pids: tuple[int, ...] = ()
+    ipc_messages: int = 0
 
     def metrics(self, workload: Workload) -> dict[str, float]:
         if len(self.tokens) != len(workload.arrivals_ns) or any(len(times) != workload.output for times in self.tokens.values()):
@@ -43,44 +42,79 @@ class ServingResult:
                 "itl_median_ms": statistics.median(intervals) / 1e6 if intervals else 0}
 
 
-def run(workload: Workload, configurations: list[tuple[VllmConfig, KVCacheConfig, int, int]],
-        models: list[StepCost], bridge_path: Path, scale: float = 1, paced: bool = False) -> ServingResult:
+def run(workload: Workload, configurations: list[Configuration],
+        models: list[StepCost], bridge_path: Path, scale: float = 1, paced: bool = False,
+        ranks: RankGroup | None = None) -> ServingResult:
     if not workload.arrivals_ns or sorted(workload.arrivals_ns) != list(workload.arrivals_ns) or min(workload.arrivals_ns) < 0 or workload.prompt <= 0 or workload.output <= 0 or scale <= 0:
         raise ValueError("invalid serving workload")
     if not models or len(configurations) != len(models):
         raise ValueError("every rank needs a configuration and cost model")
     if any(model.scope != "whole_step_including_host_and_communication" for model in models):
         raise ValueError("scheduler boundary requires whole-step scope; included host/communication must not be billed again")
-    schedulers = [make_scheduler(configuration) for configuration in configurations]
+    group = ranks or RankGroup(configurations)
+    if group.size != len(models):
+        raise ValueError("every rank needs a configuration and cost model")
     clock_type = PacedCoordinator if paced else Coordinator
-    clock = clock_type(("requests", "scheduler", "device"))
+    rank_names = tuple(f"rank-{i}" for i in range(len(models)))
+    clock = clock_type(("requests", "scheduler", "device", *rank_names))
     for i, arrival in enumerate(workload.arrivals_ns):
         clock.send("requests", "scheduler", "arrival", str(i), arrival, arrival)
     forever = (1 << 63) - 1
     clock.certify("requests", forever)
     clock.certify("device", forever)
-    ledger = ControlLedger()
     result = ServingResult(0, {}, [], [], [], 0)
     submitted = 0
     step = 0
     bridge = ResourceBridge(bridge_path, len(models))
+
+    def exchange(operation: Operation, arrivals: tuple[tuple[str, int, int, int], ...] = (),
+                 configurations: list[Configuration] | None = None) -> list[Reply]:
+        identities = []
+        for actor in rank_names:
+            clock.resume(actor)
+            identities.append(clock.begin_send(actor))
+        replies = group.command(operation, clock.now, arrivals, configurations)
+        if any((r.unfinished, r.waiting, r.control_reads) !=
+               (replies[0].unfinished, replies[0].waiting, replies[0].control_reads) for r in replies):
+            raise RuntimeError("cross-rank control state mismatch")
+        # All pipes have replied before any virtual-time advance. IPC wall delay
+        # cannot rewrite the event's logical creation/delivery timestamp.
+        for actor, identity, reply in zip(rank_names, identities, replies):
+            clock.register(identity, "scheduler", "rank_reply", f"{reply.epoch}:{reply.sequence}",
+                           reply.virtual_ns, reply.virtual_ns)
+            clock.certify(actor, forever)
+        return replies
+
+    def deliver(events: list[Event]) -> list[tuple[str, int, int, int]]:
+        arrivals = []
+        for event in events:
+            if event.kind == "arrival":
+                arrivals.append((event.payload, workload.prompt, workload.output, event.created_ns))
+                result.arrivals_observed_ns.append(clock.now)
+            elif event.kind == "rank_reply":
+                if event.created_ns != event.deliver_ns or event.observed_ns != event.created_ns:
+                    raise RuntimeError("protocol_failure: IPC acknowledgement timestamp changed")
+                result.ipc_messages += 1
+            elif event.kind != "completion":
+                raise ValueError("unexpected serving event")
+        return arrivals
+
     try:
-        while submitted < len(workload.arrivals_ns) or schedulers[0].get_num_unfinished_requests():
-            if not schedulers[0].get_num_unfinished_requests():
+        replies = exchange("reset", configurations=configurations)
+        while submitted < len(workload.arrivals_ns) or replies[0].unfinished:
+            while not replies[0].unfinished:
                 clock.certify("scheduler", forever)
-                events = clock.advance()
-                for event in events:
-                    if event.kind != "arrival":
-                        raise ValueError("unexpected idle scheduler event")
-                    index = int(event.payload)
-                    for scheduler in schedulers:
-                        add_request(scheduler, str(index), workload.prompt, workload.output, event.created_ns)
-                    result.arrivals_observed_ns.append(clock.now)
-                    submitted += 1
-            scheduled = [scheduler.schedule() for scheduler in schedulers]
-            if any(out.num_scheduled_tokens != scheduled[0].num_scheduled_tokens for out in scheduled):
+                arrivals = deliver(clock.advance())
+                if arrivals:
+                    replies = exchange("arrive", arrivals=tuple(arrivals))
+                    submitted += len(arrivals)
+            scheduled = exchange("schedule")
+            if any(out.token_counts != scheduled[0].token_counts for out in scheduled):
                 raise ValueError("cross-rank batch mismatch")
-            shapes = [scheduled_shape(scheduler, out) for scheduler, out in zip(schedulers, scheduled)]
+            shapes: list[Shape] = []
+            for reply in scheduled:
+                assert reply.shape is not None
+                shapes.append(reply.shape)
             if any(shape != shapes[0] for shape in shapes):
                 raise ValueError("cross-rank shape mismatch")
             step += 1
@@ -97,27 +131,31 @@ def run(workload: Workload, configurations: list[tuple[VllmConfig, KVCacheConfig
                 clock.certify("device", end)
                 while clock.now < end:
                     clock.certify("scheduler", end)
-                    for event in clock.advance():
-                        if event.kind == "arrival":
-                            index = int(event.payload)
-                            for scheduler in schedulers:
-                                add_request(scheduler, str(index), workload.prompt, workload.output, event.created_ns)
-                            result.arrivals_observed_ns.append(clock.now)
-                            submitted += 1
+                    arrivals = deliver(clock.advance())
+                    if arrivals:
+                        replies = exchange("arrive", arrivals=tuple(arrivals))
+                        submitted += len(arrivals)
                 bridge.advance(end)
             clock.certify("device", forever)
-            visible = [complete_step(scheduler, out, ledger, f"{step}/{rank}") for rank, (scheduler, out) in enumerate(zip(schedulers, scheduled))]
+            replies = exchange("complete")
+            visible = [reply.visible for reply in replies]
             if any(rank != visible[0] for rank in visible):
                 raise ValueError("cross-rank control output mismatch")
             for rid, tokens, finished in visible[0]:
                 result.tokens.setdefault(rid, []).extend([clock.now] * len(tokens))
-            result.batch_ids.append(list(scheduled[0].num_scheduled_tokens))
-            result.waiting.append(len(schedulers[0].waiting))
+            assert scheduled[0].token_counts is not None
+            result.batch_ids.append(list(scheduled[0].token_counts))
+            result.waiting.append(replies[0].waiting)
+        clock.certify("scheduler", forever)
+        deliver(clock.advance())
         result.finish_ns = clock.now
-        result.control_reads = len(ledger.reads)
+        result.control_reads = sum(reply.control_reads for reply in replies)
+        result.rank_pids = tuple(sorted(group.pids))
         if torch.cuda.is_initialized():
             raise RuntimeError("CPU adapter initialized CUDA")
         result.metrics(workload)
         return result
     finally:
         bridge.close()
+        if ranks is None:
+            group.close()

@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import pickle
+import socket
+import subprocess
 import sys
 import time
 
@@ -18,6 +20,7 @@ import torch
 from vllm import LLM, SamplingParams
 from vllm.sampling_params import RequestOutputKind
 from vllm.v1.engine.core import resolve_kv_cache_block_sizes
+from vllm.distributed.parallel_state import get_world_group
 from adapters.vllm.runner import ServingResult, Workload
 from adapters.vllm.worker import scheduled_shape
 
@@ -27,13 +30,35 @@ def main() -> None:
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--tp", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--transport", choices=("auto", "socket"), default="auto")
+    parser.add_argument("--native-rank", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if version("vllm") != "0.30.0" or args.repeats < 2:
         parser.error("native collector requires vLLM 0.30.0 and at least two repeats")
     root = args.evidence
     root.mkdir(parents=True, exist_ok=True)
+    if args.transport == "socket":
+        os.environ.update(NCCL_P2P_DISABLE="1", NCCL_SHM_DISABLE="1", NCCL_NET="Socket")
+    if args.tp > 1 and args.native_rank is None:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        processes = []
+        for rank in range(args.tp):
+            environment = dict(os.environ, RANK=str(rank), LOCAL_RANK=str(rank),
+                               WORLD_SIZE=str(args.tp), MASTER_ADDR="127.0.0.1", MASTER_PORT=str(port))
+            processes.append(subprocess.Popen([sys.executable, __file__, *sys.argv[1:],
+                                               "--native-rank", str(rank)], env=environment))
+        statuses = [process.wait() for process in processes]
+        if any(statuses):
+            raise RuntimeError(f"native rank failure: {statuses}")
+        return
+    rank = args.native_rank or 0
     started = time.perf_counter_ns()
-    llm = LLM(model=str(args.model), dtype="bfloat16", tensor_parallel_size=1,
+    llm = LLM(model=str(args.model), dtype="bfloat16", tensor_parallel_size=args.tp,
+              distributed_executor_backend="external_launcher" if args.tp > 1 else "uni", seed=1,
+              disable_custom_all_reduce=args.transport == "socket",
               enforce_eager=True, async_scheduling=False, enable_prefix_caching=False,
               enable_chunked_prefill=False, max_model_len=512, max_num_seqs=32,
               max_num_batched_tokens=4096, kv_cache_memory_bytes=1 << 30,
@@ -49,7 +74,12 @@ def main() -> None:
     config.compilation_config.static_forward_context = {}
     configuration = (config, scheduler.kv_cache_config, block, hashed)
     config_data = pickle.dumps(configuration)
-    (root / "scheduler-config.pkl").write_bytes(config_data)
+    if rank == 0:
+        (root / "scheduler-config.pkl").write_bytes(config_data)
+        (root / "native-run.json").write_text(json.dumps({"tp": args.tp, "transport": args.transport,
+            "vllm": version("vllm"), "torch": torch.__version__, "cuda": torch.version.cuda,
+            "scope": "whole_step_including_host_and_communication"}))
+    cpu_group = get_world_group().cpu_group
     native_schedule = scheduler.schedule
     steps: list[dict] = []
     identities: dict[str, str] = {}
@@ -64,7 +94,11 @@ def main() -> None:
     scheduler.schedule = schedule
 
     def collect(workload: Workload, max_sequences: int) -> dict:
+        if rank == 0:
+            print(f"begin {workload.name} sequences={max_sequences}", flush=True)
         scheduler.max_num_running_reqs = max_sequences
+        if args.tp > 1:
+            torch.distributed.barrier(group=cpu_group)
         begin = time.perf_counter_ns()
         submitted = 0
         tokens: dict[str, list[int]] = {}
@@ -72,6 +106,12 @@ def main() -> None:
         steps.clear()
         while submitted < len(workload.arrivals_ns) or engine.has_unfinished_requests():
             elapsed = time.perf_counter_ns() - begin
+            if args.tp > 1 and submitted < len(workload.arrivals_ns):
+                # Every native rank admits the same arrivals. This control
+                # broadcast is outside the measured engine.step() boundary.
+                shared_elapsed = torch.tensor([elapsed if rank == 0 else 0], dtype=torch.int64)
+                torch.distributed.broadcast(shared_elapsed, src=0, group=cpu_group)
+                elapsed = shared_elapsed.item()
             while submitted < len(workload.arrivals_ns) and workload.arrivals_ns[submitted] <= elapsed:
                 identity = str(submitted)
                 internal = engine.add_request(identity,
@@ -93,7 +133,16 @@ def main() -> None:
                 tokens.setdefault(output.request_id, []).extend(
                     [after - begin] * len(output.outputs[0].token_ids))
         finish = time.perf_counter_ns() - begin
+        if rank == 0:
+            print(f"finished {workload.name} steps={len(steps)} wall={finish/1e9:.3f}s", flush=True)
         result = ServingResult(finish, tokens, [step["ids"] for step in steps], [], arrivals, 0)
+        if args.tp > 1:
+            digests = [""] * args.tp
+            semantic = [(step["shape"], step["ids"]) for step in steps]
+            digest = hashlib.sha256(json.dumps((semantic, {rid: len(t) for rid, t in tokens.items()}), sort_keys=True).encode()).hexdigest()
+            torch.distributed.all_gather_object(digests, digest, group=cpu_group)
+            if len(set(digests)) != 1:
+                raise RuntimeError("native TP rank batch/token mismatch")
         return {"workload": asdict(workload), "max_sequences": max_sequences,
                 "metrics": result.metrics(workload), "steps": list(steps),
                 "tokens": tokens, "arrivals_observed_ns": arrivals}
@@ -106,7 +155,8 @@ def main() -> None:
             for repeat in range(2):
                 calibration.append(collect(Workload(f"fit-{batch}-{prompt}-{repeat}", (0,) * batch, prompt, 96), 32))
     calibration_data = json.dumps(calibration).encode()
-    (root / "calibration.json").write_bytes(calibration_data)
+    if rank == 0:
+        (root / "calibration.json").write_bytes(calibration_data)
     # The file above is immutable input to fitting; held-out measurements follow.
     validation = []
     for sequences in (8, 16, 32):
@@ -114,13 +164,15 @@ def main() -> None:
             for workload in (Workload("burst-128", (0,) * 128, 64, 64),
                              Workload("two-waves-96", (0,) * 48 + (100_000_000,) * 48, 64, 64)):
                 validation.append(collect(workload, sequences))
-                print(f"captured {workload.name} sequences={sequences} repeat={repeat}", flush=True)
-    (root / "validation.json").write_text(json.dumps(validation))
-    print(f"native campaign wall seconds={(time.perf_counter_ns()-started)/1e9:.3f}")
-    print(f"vllm={version('vllm')} torch={torch.__version__} CUDA={torch.version.cuda}")
-    print(f"configuration_sha256={hashlib.sha256(config_data).hexdigest()}")
-    print(f"calibration_sha256={hashlib.sha256(calibration_data).hexdigest()}")
-    torch.distributed.destroy_process_group()
+                if rank == 0:
+                    print(f"captured {workload.name} sequences={sequences} repeat={repeat}", flush=True)
+    if rank == 0:
+        (root / "validation.json").write_text(json.dumps(validation))
+        print(f"native TP{args.tp} campaign wall seconds={(time.perf_counter_ns()-started)/1e9:.3f}")
+        print(f"vllm={version('vllm')} torch={torch.__version__} CUDA={torch.version.cuda}")
+        print(f"configuration_sha256={hashlib.sha256(config_data).hexdigest()}")
+        print(f"calibration_sha256={hashlib.sha256(calibration_data).hexdigest()}")
+    engine.engine_core.engine_core.shutdown()
 
 
 if __name__ == "__main__":
