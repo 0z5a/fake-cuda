@@ -30,6 +30,7 @@ struct PredictorResult {
     std::string source;
     std::optional<MeasurementIdentity> measurement{};
     std::uint64_t covered_invocation = 0;
+    std::shared_ptr<const SemanticBinding> semantic{};
     bool supported() const;
 };
 PredictorResult synthetic_kernel_prediction();
