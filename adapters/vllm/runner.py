@@ -30,7 +30,7 @@ class ServingResult:
     rank_pids: tuple[int, ...] = ()
     ipc_messages: int = 0
 
-    def metrics(self, workload: Workload) -> dict[str, float]:
+    def metrics(self, workload: Workload) -> dict[str, float | None]:
         if len(self.tokens) != len(workload.arrivals_ns) or any(len(times) != workload.output for times in self.tokens.values()):
             raise ValueError("incomplete serving workload")
         ttft = [self.tokens[str(i)][0] - arrival for i, arrival in enumerate(workload.arrivals_ns)]
@@ -39,7 +39,7 @@ class ServingResult:
             raise ValueError("invalid token timeline")
         return {"finish_ns": self.finish_ns, "tokens_per_second": len(ttft) * workload.output * 1e9 / self.finish_ns,
                 "ttft_median_ms": statistics.median(ttft) / 1e6,
-                "itl_median_ms": statistics.median(intervals) / 1e6 if intervals else 0}
+                "itl_median_ms": statistics.median(intervals) / 1e6 if intervals else None}
 
 
 def run(workload: Workload, configurations: list[Configuration],

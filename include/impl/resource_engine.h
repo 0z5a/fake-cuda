@@ -21,6 +21,8 @@ struct ResourceWork {
     std::vector<std::uint64_t> dependencies;
     std::vector<ResourcePhase> phases;
     long double weight = 1;
+    // Buffers held from first admission through the last phase, including waits.
+    std::vector<std::uint64_t> held;
 };
 enum class WorkState { pending, ready, running, completed };
 struct CompletionToken {

@@ -12,3 +12,5 @@ All probes compile as C++23 against CUDA Driver headers and load this project's 
 - `virtual_thread_probe.cpp`: concurrent submission and context retirement.
 
 A passing copy/launch test checks address validation and virtual scheduling **only**: device memory stores no bytes, and CUDA kernels do not execute. When adding an exported Driver API, add a direct invocation and relevant error/lifetime assertions to `api_contract.cpp`, then a focused scheduling test when needed.
+
+`semantic_contract.py` checks operator ledgers, fresh Graph bindings, chunk prefill and single-charge fusion coverage. `serving_contract.py` checks FCFS/chunk/cancellation timing, per-card pools and request/token conservation. `ep_contract.py` uses `resource_engine_bridge --resources` for shared link/SM capacity, held chunk buffers, remaining-work generations and discrete combined costs. CMake registers all three; the no-kill `tests/integration/tooling/run_contracts.py /path/to/build` executes registered commands through natural exit without CTest timeout termination.

@@ -110,6 +110,8 @@ if(BUILD_TESTING)
     find_package(Python3 3.10 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME semantic_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/semantic_contract.py")
+        add_test(NAME serving_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/serving_contract.py")
+        add_test(NAME ep_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/ep_contract.py" "$<TARGET_FILE:resource_engine_bridge>")
         add_test(NAME coordinator_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/coordinator_contract.py")
         add_test(NAME cache_contract COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/unit/cache_contract.py")
         add_test(NAME probe_contract COMMAND "${Python3_EXECUTABLE}"

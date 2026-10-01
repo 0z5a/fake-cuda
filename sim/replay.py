@@ -34,13 +34,16 @@ class Report:
     release_times: tuple[tuple[str, int], ...] = ()
 
     def accounting(self) -> dict[str, int | str | None]:
+        expected = sum(len(e.lowered.stages) for e in self.estimates if not e.work.fusion_group)
+        expected += len({e.work.fusion_group for e in self.estimates if e.work.fusion_group})
+        coverage = {"count_coverage": f"{len(self.timeline)}/{expected}", "scope": self.scope}
         if self.makespan_ns is None:
-            return {"makespan_ns": None, "status": "incomplete"}
+            return {**coverage, "makespan_ns": None, "status": "incomplete"}
         sums = {name: 0 for name in ("attn_core", "attn_module", "moe", "other", "fused_shared")}
         for item in self.timeline:
             sums[item.category] += item.end_ns - item.start_ns
         sums["attn_module"] += sums["attn_core"]
-        return {**{f"{name}_ns": value for name, value in sums.items()}, "host_gap_ns": self.host_gap_ns,
+        return {**coverage, **{f"{name}_ns": value for name, value in sums.items()}, "host_gap_ns": self.host_gap_ns,
                 "makespan_ns": self.makespan_ns, "unknown_count": self.unknown_count,
                 "schedule_mode": self.schedule_mode, "status": self.status}
 

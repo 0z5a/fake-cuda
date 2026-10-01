@@ -89,6 +89,13 @@ class KDA:
 
 
 @dataclass(frozen=True)
+class KDAPrefill(KDA):
+    chunk_lens: tuple[int, ...] = ()
+    chunk_size: int = 64
+    conv_width: int = 4
+
+
+@dataclass(frozen=True)
 class Unknown:
     symbol: str
     grid: tuple[int, ...]
@@ -96,7 +103,7 @@ class Unknown:
     shared_bytes: int = 0
 
 
-Spec = MoE | TopK | KDA | Unknown
+Spec = MoE | TopK | KDA | KDAPrefill | Unknown
 
 
 @dataclass(frozen=True)
@@ -133,8 +140,8 @@ class Work:
             for value in (*s.grid, *s.block, s.shared_bytes):
                 checked(value)
             return
-        if self.phase != "decode":
-            raise ValueError("M1 supports decode only; prefill needs a separate model")
+        if self.phase != ("prefill" if isinstance(s, KDAPrefill) else "decode"):
+            raise ValueError("phase needs its matching decode or independent prefill descriptor")
         if isinstance(s, (MoE, TopK)):
             for value in (s.n, s.e, s.k):
                 checked(value)
@@ -180,6 +187,12 @@ class Work:
                 checked(length)
             for dtype in (s.state_dtype, s.weight_dtype, s.activation_dtype):
                 size(dtype)
+            if isinstance(s, KDAPrefill):
+                if not checked(s.chunk_size) or not checked(s.conv_width) or len(s.chunk_lens) != s.b:
+                    raise ValueError("prefill needs explicit chunk lengths, tile and convolution width")
+                for slot, length in zip(s.state_slots, s.chunk_lens):
+                    if checked(length) and slot < 0:
+                        raise ValueError("padding cannot own prefill tokens")
 
     def dumps(self) -> str:
         value = asdict(self)
@@ -193,11 +206,11 @@ class Work:
         if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {"variants"}:
             raise ValueError("descriptor fields do not match schema 1")
         # These are small, fixed constructor schemas, never executable class names.
-        constructors = {"MoE": MoE, "TopK": TopK, "KDA": KDA, "Unknown": Unknown}
+        constructors = {"MoE": MoE, "TopK": TopK, "KDA": KDA, "KDAPrefill": KDAPrefill, "Unknown": Unknown}
         if value["kind"] not in constructors:
             raise ValueError("unknown descriptor kind")
         shape = value["spec"]
-        for name in ("routes", "state_slots", "seq_lens", "grid", "block"):
+        for name in ("routes", "state_slots", "seq_lens", "chunk_lens", "grid", "block"):
             if name in shape:
                 shape[name] = tuple(tuple(row) for row in shape[name]) if name == "routes" else tuple(shape[name])
         spec = constructors[value.pop("kind")](**value.pop("spec"))
@@ -263,11 +276,15 @@ class Graph:
                 expected = replace(expected, n=spec.n)
             elif isinstance(expected, KDA) and isinstance(spec, KDA):
                 expected = replace(expected, b=spec.b, state_slots=spec.state_slots, seq_lens=spec.seq_lens)
+                if isinstance(expected, KDAPrefill) and isinstance(spec, KDAPrefill):
+                    expected = replace(expected, chunk_lens=spec.chunk_lens)
             if expected != spec:
                 raise ValueError("graph static shape/precision/layout changed")
             count = spec.b if isinstance(spec, KDA) else spec.n if isinstance(spec, (MoE, TopK)) else 0
             if count > self.max_tokens:
                 raise ValueError("graph shape exceeds captured capacity")
+            if isinstance(spec, KDAPrefill) and sum(spec.chunk_lens) > self.max_tokens:
+                raise ValueError("prefill tokens exceed captured capacity")
             if isinstance(spec, KDA) and any(slot >= self.state_capacity for slot in spec.state_slots):
                 raise ValueError("state slot exceeds captured storage")
             bound.append(replace(template, spec=spec, graph_id=self.graph_id,

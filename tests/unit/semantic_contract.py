@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from sim.cost import AnalyticCost, CalibrationStore, ConstantCost, Cost, Identity, Profile
 from sim.models import combine, kda_reference, layer_layout, lower, permutation
 from sim.replay import counterfactual, replay
-from sim.work import Execution, Graph, KDA, LIMIT, MoE, Registry, TopK, Unknown, Work, routes
+from sim.work import Execution, Graph, KDA, KDAPrefill, LIMIT, MoE, Registry, TopK, Unknown, Work, routes
 
 
 def moe() -> MoE:
@@ -106,6 +106,25 @@ class SemanticContract(unittest.TestCase):
             with self.assertRaises(ValueError):
                 Graph("g", templates, 4, 4).bind("bad", updates)
 
+    def test_prefill_has_independent_chunk_identity_and_costs(self):
+        spec = KDAPrefill(2, 2304, 32, 32, 128, 128, (0, 1), (0, 100), chunk_lens=(64, 17))
+        op = replace(work(spec), phase="prefill")
+        self.assertEqual(Work.loads(op.dumps()), op)
+        lowered = lower(op)
+        self.assertEqual(lowered.logical["tokens"], 81)
+        self.assertEqual(lowered.executed["chunks"], 2)
+        self.assertNotIn("core_simt_flops", lowered.executed)
+        self.assertIsNone(lowered.stages[2].simt_flops)
+        self.assertNotEqual(lowered.stages[2].family, lower(work(kda(2))).stages[2].family)
+        self.assertEqual(lowered.residency["conv_state_bytes"], 2 * 3 * 3 * 4096 * 2)
+        self.assertEqual(lower(replace(op, spec=replace(spec, seq_lens=(9000, 9000)))), lowered)
+        with self.assertRaises(ValueError):
+            replace(op, phase="decode").validate()
+        with self.assertRaises(ValueError):
+            lower(replace(op, spec=replace(spec, state_slots=(0, -1))))
+        with self.assertRaises(ValueError):
+            Graph("g", (op,), 80, 2).bind("fresh", {"op": spec})
+
     def test_dependencies_cycles_and_reproducibility(self):
         ops = (work(TopK(1, 4, 2), "a", stream=1), work(TopK(1, 4, 2), "b", stream=2, deps=("a",)))
         registry = Registry(ops)
@@ -135,6 +154,8 @@ class SemanticContract(unittest.TestCase):
         self.assertEqual(report.makespan_ns, 50)
         self.assertEqual(report.accounting()["fused_shared_ns"], 50)
         self.assertEqual(len(report.timeline), 1)
+        self.assertEqual(report.accounting()["count_coverage"], "1/1")
+        self.assertEqual(report.accounting()["scope"], "provided_operator_trace")
         self.assertEqual(len(report.estimates), 2)
         with self.assertRaises(ValueError):
             replay(Registry(ops), ConstantCost(30))

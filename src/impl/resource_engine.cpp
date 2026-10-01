@@ -17,12 +17,15 @@ void ResourceEngine::submit(ResourceWork work) {
         throw std::invalid_argument("invalid resource work");
     for (auto id : work.dependencies)
         if (!work_.contains(id)) throw std::invalid_argument("dependency must already be registered");
+    if (!work.held.empty() && work.held.size() != capacities_.size())
+        throw std::invalid_argument("invalid held-resource dimensions");
     for (const auto &p : work.phases) {
         if (p.isolated_service.count() <= 0 || p.demand.size() != capacities_.size() || p.resident.size() != capacities_.size())
             throw std::invalid_argument("invalid resource phase");
         for (size_t r = 0; r < capacities_.size(); ++r)
             if (!std::isfinite(p.demand[r]) || p.demand[r] < 0 || (p.demand[r] && !capacities_[r].throughput) ||
-                p.resident[r] > capacities_[r].resident)
+                p.resident[r] > capacities_[r].resident ||
+                (!work.held.empty() && work.held[r] > capacities_[r].resident - p.resident[r]))
                 throw std::invalid_argument("phase exceeds resource support");
     }
     const auto id = work.id;
@@ -53,6 +56,8 @@ void ResourceEngine::settle() {
     std::vector<std::uint64_t> used(capacities_.size());
     for (auto id : unfinished_) {
         const auto &e = work_.at(id);
+        if (e.progress.start && !e.work.held.empty())
+            for (size_t r = 0; r < used.size(); ++r) used[r] += e.work.held[r];
         if (e.progress.state == WorkState::running)
             for (size_t r = 0; r < used.size(); ++r) used[r] += e.work.phases[e.progress.phase].resident[r];
     }
@@ -68,11 +73,12 @@ void ResourceEngine::settle() {
         }
         if (p.state != WorkState::ready) continue;
         const auto &phase = e.work.phases[p.phase];
+        const bool acquire = !p.start && !e.work.held.empty();
         bool fits = true;
         for (size_t r = 0; r < used.size(); ++r)
-            fits &= phase.resident[r] <= capacities_[r].resident - used[r];
+            fits &= phase.resident[r] + (acquire ? e.work.held[r] : 0) <= capacities_[r].resident - used[r];
         if (!fits) continue;
-        for (size_t r = 0; r < used.size(); ++r) used[r] += phase.resident[r];
+        for (size_t r = 0; r < used.size(); ++r) used[r] += phase.resident[r] + (acquire ? e.work.held[r] : 0);
         p.state = WorkState::running;
         if (!p.start) p.start = now_;
     }

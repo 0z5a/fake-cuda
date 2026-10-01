@@ -16,7 +16,7 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from sim.models import lower
-from sim.work import KDA, MoE, TopK, Work
+from sim.work import KDA, KDAPrefill, MoE, TopK, Work
 
 
 class NativeMoE:
@@ -146,8 +146,8 @@ class NativeKDA:
         self.conv_state.copy_(window[:, 1:])
         projected = self.t.nn.functional.silu((window * self.conv_w).sum(dim=1))
         q, k, v = projected.reshape(self.b, 1, 3, self.h, self.dk).unbind(2)
-        self.q = self.t.nn.functional.normalize(q.float(), dim=-1).to(self.t.bfloat16)
-        self.k = self.t.nn.functional.normalize(k.float(), dim=-1).to(self.t.bfloat16)
+        self.q = self.t.nn.functional.normalize(q.float(), dim=-1).to(self.t.bfloat16).contiguous()
+        self.k = self.t.nn.functional.normalize(k.float(), dim=-1).to(self.t.bfloat16).contiguous()
         self.v = v.contiguous()
         self.g = self.t.full_like(self.q, math.log(.9))
         self.beta = self.t.full((self.b, 1, self.h), .1, device="cuda", dtype=self.t.bfloat16)
@@ -227,27 +227,83 @@ def measure(torch, call: Callable[[], None], iterations: int, mode: str) -> dict
             "scope": "operator_stage_cuda_event_interval"}
 
 
+class NativeKDAPrefill(NativeKDA):
+    """Independent FLA chunk path, with actual tokens and retained final state."""
+    def __init__(self, torch, n: int, routing: str, length: int):
+        from fla.ops.kda.chunk import chunk_kda_fwd
+        super().__init__(torch, n, routing)
+        self.chunk, self.length = chunk_kda_fwd, length
+        self.spec = KDAPrefill(n, self.d, self.h, self.h, self.dk, self.dk,
+                              tuple(range(n)), (0,) * n, chunk_lens=(length,) * n)
+        self.x = torch.randn(n, length, self.d, device="cuda", dtype=torch.bfloat16) * .1
+
+    def gates(self):
+        window = self.t.cat((self.conv_state, self.projected), dim=1)
+        self.conv_state.copy_(window[:, -3:])
+        projected = self.t.nn.functional.silu(self.t.nn.functional.conv1d(
+            window.transpose(1, 2), self.conv_w.T[:, None], groups=3 * self.h * self.dk).transpose(1, 2))
+        q, k, v = projected.reshape(self.b, self.length, 3, self.h, self.dk).unbind(2)
+        self.q = self.t.nn.functional.normalize(q.float(), dim=-1).to(self.t.bfloat16).contiguous()
+        self.k = self.t.nn.functional.normalize(k.float(), dim=-1).to(self.t.bfloat16).contiguous()
+        self.v = v.contiguous()
+        self.g = self.t.full_like(self.q, math.log(.9))
+        self.beta = self.t.full((self.b, self.length, self.h), .1, device="cuda", dtype=self.t.bfloat16)
+
+    def core(self):
+        self.attended, final_state = self.chunk(self.q, self.k, self.v, self.g, self.beta,
+            scale=1., initial_state=self.state, output_final_state=True, chunk_size=64)[:2]
+        self.state.copy_(final_state)
+
+    def out_gate(self):
+        value = self.attended.float()
+        value = value * self.t.rsqrt(value.square().mean(dim=-1, keepdim=True) + 1e-5)
+        self.gated_output = (value * self.t.sigmoid(self.q.float())).reshape(self.b, self.length, -1).to(self.t.bfloat16)
+
+    def check(self):
+        self.qkv(); self.gates()
+        initial = self.state.clone()
+        expected = []
+        for token in range(self.length):
+            inputs = [value[:, token:token+1].contiguous() for value in (self.q, self.k, self.v, self.g, self.beta)]
+            value, _ = self.fused(*inputs, scale=1., initial_state=self.state,
+                output_final_state=True, inplace_final_state=True, ssm_state_indices=self.slots)
+            expected.append(value)
+        final_state = self.state.clone()
+        self.state.copy_(initial)
+        self.core()
+        self.t.testing.assert_close(self.attended, self.t.cat(expected, dim=1), atol=3e-4, rtol=3e-2)
+        self.t.testing.assert_close(self.state, final_state, atol=2e-5, rtol=5e-3)
+
+
 def session(args) -> None:
     if os.environ.get("LD_PRELOAD") or "fakecuda" in os.environ.get("LD_LIBRARY_PATH", "").lower():
         raise ValueError("native measurement must not load the fake Driver")
     import torch
     import fla.ops.kda.fused_recurrent as kda_source
+    import fla.ops.kda.chunk as chunk_source
     torch.cuda.set_device(args.device)
     torch.set_num_threads(1)
     mapped = {Path(line.split()[-1]) for line in Path('/proc/self/maps').read_text().splitlines()
               if len(line.split()) >= 6 and any(name in line.split()[-1] for name in ('libtorch_cuda.so', 'libcuda.so', 'libcublas.so', 'libcublasLt.so'))}
-    source_files = (Path(__file__), Path(kda_source.__file__), Path(torch.__file__), *sorted(mapped))
+    source_files = (Path(__file__), Path(kda_source.__file__), Path(chunk_source.__file__), Path(torch.__file__), *sorted(mapped))
     sources = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_files}
     versions = {name: metadata.version(name) for name in ("torch", "triton", "fla-core", "einops")}
     revision = hashlib.sha256(json.dumps({"sources": sources, "versions": versions}, sort_keys=True).encode()).hexdigest()
     identity = {"hardware": str(torch.cuda.get_device_properties(args.device).uuid),
                 "driver": subprocess.check_output(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"], text=True).splitlines()[args.device],
                 "backend": "native_m1", "revision": revision, "mode": args.mode, "cache": "measured-steady"}
+    def background() -> list[str]:
+        lines = subprocess.check_output(["nvidia-smi", "--query-compute-apps=gpu_uuid,pid,used_gpu_memory", "--format=csv,noheader"], text=True).splitlines()
+        selected = [line for line in lines if line.split(",")[0].strip() == identity["hardware"] and int(line.split(",")[1]) != os.getpid()]
+        if args.require_idle_device and selected:
+            raise ValueError("native calibration device has another registered GPU process")
+        return selected
     constructors = {"moe": NativeMoE, "topk": NativeTopK, "kda": NativeKDA}
     rows = []
     for n in map(int, args.batches.split(",")):
+        jobs_before = background()
         torch.manual_seed(1000 * args.session + n + (10000 if args.split == "validation" else 0))
-        native = constructors[args.family](torch, n, args.routing)
+        native = NativeKDAPrefill(torch, n, args.routing, args.sequence_length) if args.family == "prefill" else constructors[args.family](torch, n, args.routing)
         native.check()
         variants = ()
         if args.family == "moe":
@@ -261,6 +317,7 @@ def session(args) -> None:
             native.full()
         torch.cuda.synchronize()
         op = Work(f"{args.family}-{n}-{args.routing}", native.spec, identity["backend"], revision,
+                  phase="prefill" if args.family == "prefill" else "decode",
                   graph_id="native-fixed-address" if args.mode == "graph" else "", variants=variants)
         lowered = lower(op)
         assert native.stage_names == tuple(stage.name for stage in lowered.stages)
@@ -268,7 +325,8 @@ def session(args) -> None:
         measurements["whole"] = measure(torch, native.full, args.iterations, args.mode)
         row = {"descriptor": op.dumps(), "stages": [asdict(stage) for stage in lowered.stages], "measurements": measurements,
                "compiled_route_launches": names if args.family == "moe" else (),
-               "peak_allocated_bytes": torch.cuda.max_memory_allocated()}
+               "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+               "background_before": jobs_before, "background_after": background()}
         rows.append(row)
         print(args.family, args.split, args.routing, args.session, n, measurements["whole"]["median_ns"], flush=True)
         del native
@@ -285,12 +343,14 @@ def session(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--family", choices=("moe", "topk", "kda"), required=True)
+    parser.add_argument("--family", choices=("moe", "topk", "kda", "prefill"), required=True)
+    parser.add_argument("--sequence-length", type=int, default=64)
     parser.add_argument("--batches", default="1,8,32,64,128")
     parser.add_argument("--routing", choices=("uniform", "hot"), default="uniform")
     parser.add_argument("--split", choices=("calibration", "validation"), required=True)
     parser.add_argument("--mode", choices=("eager", "graph"), default="graph")
     parser.add_argument("--device", type=int, default=0)
+    parser.add_argument("--require-idle-device", action="store_true")
     parser.add_argument("--warmup", type=int, default=30)
     parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--sessions", type=int, default=5)
@@ -300,7 +360,7 @@ def main() -> None:
     cache = args.output.parent / "compile-cache"
     os.environ["TRITON_CACHE_DIR"] = str(cache / "triton")
     os.environ["CUDA_CACHE_PATH"] = str(cache / "cuda")
-    if min(args.warmup, args.iterations, args.sessions) < 1:
+    if min(args.warmup, args.iterations, args.sessions, args.sequence_length) < 1:
         parser.error("positive warmup, iterations and sessions required")
     if args.session:
         session(args)

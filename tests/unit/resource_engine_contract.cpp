@@ -48,6 +48,19 @@ int main() {
     phases.advance_to(35ns);
     require(phases.progress(2).start == 10ns && phases.progress(2).completion == 15ns);
     require(phases.progress(3).start == 30ns && phases.progress(3).completion == 35ns);
+    // A dispatch buffer survives every phase and a stalled compute phase. A
+    // second chunk may acquire it only after the first combine completes.
+    ResourceEngine held({{0, 1}, {0, 1}});
+    held.submit({1, 0ns, {}, {{10ns, {0, 0}, {0, 0}}, {20ns, {0, 0}, {0, 1}},
+                            {10ns, {0, 0}, {0, 0}}}, 1, {1, 0}});
+    held.submit({2, 0ns, {}, {{5ns, {0, 0}, {0, 0}}}, 1, {1, 0}});
+    held.submit(serial(3, 0ns, 25ns, {}, 1));
+    held.advance_to(10ns);
+    require(held.progress(1).state == WorkState::ready && !held.progress(2).start);
+    held.advance_to(55ns);
+    require(held.progress(1).completion == 55ns && held.progress(2).start == 55ns);
+    held.advance_to(60ns);
+    require(held.progress(2).completion == 60ns);
     // Weighted sharing and a separate bottleneck do not manufacture bandwidth.
     ResourceEngine weighted({{1, 0}, {2, 0}});
     weighted.submit({1, 0ns, {}, {{100ns, {100, 0}, {0, 0}}}, 3});

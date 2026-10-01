@@ -1,6 +1,6 @@
 """Pure work lowering. Algorithm work, executed padding, traffic and storage differ."""
 from dataclasses import dataclass
-from .work import KDA, MoE, TopK, Unknown, Work, checked, size
+from .work import KDA, KDAPrefill, MoE, TopK, Unknown, Work, checked, size
 
 
 @dataclass(frozen=True)
@@ -95,12 +95,16 @@ def lower(work: Work) -> Lowered:
                   byte_count=resident["shared_weight_bytes"])
             stage("output_add", "moe", family, (s.n,), simt=s.n * s.d, byte_count=3 * s.n * s.d * aa)
     else:
-        live = sum(slot >= 0 for slot in s.state_slots)
+        prefill = isinstance(s, KDAPrefill)
+        live = sum(slot >= 0 for slot in s.state_slots) if not prefill else sum(length > 0 for length in s.chunk_lens)
+        tokens = checked(sum(s.chunk_lens)) if prefill else live
         elements = checked(live * s.h_v * s.d_k * s.d_v)
         state_bytes = checked(elements * size(s.state_dtype))
-        qkvo = checked(4 * live * s.d * (s.h_qk * s.d_k + s.h_v * s.d_v))
-        logical = {"core_flops": checked(7 * elements), "qkvo_flops": qkvo, "live_sequences": live}
-        executed = {"core_simt_flops": logical["core_flops"], "qkvo_tc_flops": qkvo}
+        qkvo = checked(4 * tokens * s.d * (s.h_qk * s.d_k + s.h_v * s.d_v))
+        logical = {"core_flops": checked(7 * tokens * s.h_v * s.d_k * s.d_v), "qkvo_flops": qkvo, "live_sequences": live}
+        executed = {"qkvo_tc_flops": qkvo}
+        if not prefill:
+            executed["core_simt_flops"] = logical["core_flops"]
         traffic = {"logical_state_bytes": checked(2 * state_bytes)}
         resident = {"live_state_bytes": state_bytes,
                     "allocated_state_bytes": checked(s.capacity * s.h_v * s.d_k * s.d_v * size(s.state_dtype)),
@@ -109,11 +113,19 @@ def lower(work: Work) -> Lowered:
                   s.weight_dtype, s.activation_dtype, s.accum_dtype, s.state_layout)
         if s.state_policy != "fixed_slots":
             family += (s.state_policy,)
+        if prefill:
+            lengths = tuple(length for length in s.chunk_lens if length)
+            shape = ("uniform", lengths[0]) if lengths and len(set(lengths)) == 1 else ("ragged", tuple(sorted(lengths)))
+            family += ("prefill", s.chunk_size, s.conv_width, shape)
+            executed["chunks"] = checked(sum((length + s.chunk_size - 1) // s.chunk_size for length in lengths))
+            logical["tokens"] = tokens
+            resident["conv_state_bytes"] = checked(s.capacity * (s.conv_width - 1)
+                                                  * (2 * s.h_qk * s.d_k + s.h_v * s.d_v) * size(s.activation_dtype))
         # QKV and O need separate work: qkv = 2*N*D*(2*Hqk*dk + Hv*dv).
-        qkv = checked(2 * live * s.d * (2 * s.h_qk * s.d_k + s.h_v * s.d_v))
+        qkv = checked(2 * tokens * s.d * (2 * s.h_qk * s.d_k + s.h_v * s.d_v))
         stage("qkv", "attn_module", family, (live,), tc=qkv)
         stage("gates", "attn_module", family, (live,), simt=None)
-        stage("core", "attn_core", family, (live,), simt=logical["core_flops"],
+        stage("core", "attn_core", family, (live,), simt=None if prefill else logical["core_flops"],
               byte_count=traffic["logical_state_bytes"])
         stage("out_gate", "attn_module", family, (live,), simt=None)
         stage("o_proj", "attn_module", family, (live,), tc=qkvo - qkv)
