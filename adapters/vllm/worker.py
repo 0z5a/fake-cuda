@@ -14,9 +14,9 @@ from adapters.common.control import ControlLedger, ControlValue, DataKind
 from adapters.vllm.costs import Shape
 
 
-def make_scheduler(configuration: tuple[VllmConfig, KVCacheConfig, int, int]) -> Scheduler:
+def make_scheduler(configuration: tuple[VllmConfig, KVCacheConfig, int, int], *, allow_chunked: bool = False) -> Scheduler:
     config, kv_config, block_size, hash_size = configuration
-    if config.scheduler_config.async_scheduling or config.cache_config.enable_prefix_caching or config.speculative_config is not None or config.scheduler_config.enable_chunked_prefill:
+    if config.scheduler_config.async_scheduling or config.cache_config.enable_prefix_caching or config.speculative_config is not None or (config.scheduler_config.enable_chunked_prefill and not allow_chunked):
         raise ValueError("unsupported scheduler configuration")
     config.cache_config.num_gpu_blocks = kv_config.num_blocks
     config.cache_config.block_size = block_size

@@ -160,6 +160,8 @@ The PyTorch probes run in Docker with no GPU devices and no network; `all` check
 
 ## Debugging findings
 
+- **Independent model reference:** Transformers 5.18 chat templates return a `BatchEncoding`; the CPU reference reads its explicit `input_ids`. The full published Granite checkpoint produces the expected prime-number and France-capital answers without initializing CUDA. Native generation, graph replay and recorded-control scheduler validation remain separate checks; a CPU reference alone is not fake-driver numerical inference.
+
 - **Native chunk layout:** FLA chunk/reference kernels read packed Q/K; depthwise convolution produced dense but strided views and incorrect state/output values. Explicit contiguous inputs and one-token recurrent reference calls resolve the mismatch before calibration. Three independent 64-token prefill shapes pass with 0.65% median whole-operator timing error; this is the declared surrogate module, not full-model continued prefill.
 
 - **Native peer graph capture:** Torch peer copies and `cuMemcpyPeerAsync` returned CUDA error 900 during capture on these H20s. Explicit destination-context peer mapping permits captured `cuMemcpyDtoDAsync_v2` with the peer pointer. The paired event campaigns pass; fake Driver peer capture remains unsupported. Standalone-window sums and paired windows are different measurement boundaries and are labeled separately.
