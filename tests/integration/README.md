@@ -91,3 +91,11 @@ not papered over by fake Driver success. `FAKE_CUDA_TRACE=1` and
 virtual addresses, no tensor bytes are stored or copied, and kernels do not
 execute. Passing any import, discovery, or startup stage is not evidence that
 model outputs or computations work.
+
+## Native whole-model and CPU scheduler replay
+
+`tooling/calibrate_serving.py --suite model --model /path/to/checkpoint --tp 2 --attention-backend auto --evidence /path/to/raw` loads the real BF16 checkpoint under vLLM 0.30.0, captures complete engine steps and generates text examples. Calibration uses batches 1/4/8, prompt lengths 32/64/128 and 64 output tokens. It freezes the step table before warming and capturing held-out batches 2/3/6, prompts 48/96/112 and 32 output tokens, with three repeats. TP ranks agree on batch membership and exact generated token IDs. The `smoke` suite is a shorter architecture check; `--load-format dummy` labels its evidence as random-weight and cannot qualify checkpoint inference.
+
+`tooling/evaluate_model_replay.py --evidence /path/to/raw --config-sha256 TRUSTED_DIGEST --bridge /path/to/resource_engine_bridge --output /path/to/raw/result.json` verifies trusted scheduler metadata and the frozen calibration table before reading validation. Two independent CPU rank processes run the original Scheduler/KV manager, checking exact batch membership and declared arrivals. This U1 path emits fixed-length oracle tokens; numerical token values remain native evidence. Whole-step costs already contain host and communication work. Each child receives EOF and exits naturally; these tools do not terminate processes on a timeout.
+
+`tooling/benchmark_semantic_process.py` compares immutable before/after source trees using complete offline processes and checks target digests. [Short-trace speed and model results](../../results/2026-10-01/topk-model-e2e.md) record the actual scopes and retained input identities.
