@@ -1,5 +1,5 @@
 """A serial operator clock, distinct from kernel service and live serving actors."""
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -45,7 +45,7 @@ class Report:
                 "schedule_mode": self.schedule_mode, "status": self.status}
 
     def digest(self) -> str:
-        payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        payload = json.dumps(self, default=vars, sort_keys=True, separators=(",", ":"), allow_nan=False)
         return hashlib.sha256(payload.encode()).hexdigest()
 
 

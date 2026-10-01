@@ -158,6 +158,8 @@ The PyTorch probes run in Docker with no GPU devices and no network; `all` check
 
 ## Debugging findings
 
+- **Short-trace report overhead:** CPU profiling attributed most short selection-trace overhead to recursive dataclass conversion during report hashing. Encoding the existing fields directly preserves canonical bytes and every target digest. Equal-target fresh offline processes improve 1.143× for 400 operators and 1.403× for 4000, with improvement in every session. This is CPU simulator throughput; numerical model execution is a separate validation. [Speed protocol and results](results/2026-10-01/topk-model-e2e.md).
+
 - **Compiled routing variants:** An aggregate routing fit passed whole-MoE timing but failed its stage gate (38.14% P95 error). CUDA launch traces of the pinned PyTorch backend showed distinct fixed-size radix-sort instantiations. Explicit compiled-path keys and calibration at their boundaries reduced routing P95 error from 41.06% on the first validation set to 4.38% on a new, disjoint set. These are separate validation datasets; no old validation durations were fitted. NCU counter collection was denied by the container, so no DRAM/occupancy measurements are inferred from these traces.
 
 - **Recurrent state ownership:** FLA 0.5.2's public KDA wrapper accepts keyword arguments but calls its forward routine with `inplace_final_state=False`, omitting slot indices. The native harness uses the pinned forward entry point and verifies both state values and permuted slot writes before timing. CUDA event spans are measured with queued graph submissions; host submission is retained separately, and diagnostic profiler timings never enter calibration.

@@ -1,5 +1,7 @@
 """CPU algebra, binding, scheduling and coverage; synthetic timings only."""
-from dataclasses import replace
+from dataclasses import asdict, replace
+import hashlib
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -117,6 +119,15 @@ class SemanticContract(unittest.TestCase):
             Registry((replace(ops[0], deps=("missing",)),))
         with self.assertRaises(ValueError):
             Registry((ops[0], replace(ops[0], op_id="duplicate")))
+
+    def test_report_digest_preserves_canonical_bytes(self):
+        for spec in (moe(), kda(), TopK(2, 256, 8), Unknown("opaque", (1, 1, 1), (32, 1, 1))):
+            for instance in ("first", "second"):
+                op = work(spec)
+                op = replace(op, execution=replace(op.execution, instance=instance))
+                report = replay(Registry((op,)), ConstantCost(30), {"op": 100})
+                reference = json.dumps(asdict(report), sort_keys=True, separators=(",", ":"), allow_nan=False)
+                self.assertEqual(report.digest(), hashlib.sha256(reference.encode()).hexdigest())
 
     def test_fusion_one_physical_charge(self):
         ops = tuple(replace(work(TopK(1, 4, 2), str(i), i), fusion_group="physical") for i in range(2))
