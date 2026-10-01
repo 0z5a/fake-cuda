@@ -276,6 +276,7 @@ def verify(args) -> None:
     baseline = documents["eager"]
     differences = []
     for variant, document in documents.items():
+        assert [record["case"]["name"] for record in document["records"]] == [case.name for case in CASES]
         assert (document["tp"], document["ep"]) == (args.tp, args.ep)
         assert document["source_sha256"] == baseline["source_sha256"]
         assert document["identity"]["model_config_sha256"] == baseline["identity"]["model_config_sha256"]
@@ -283,13 +284,11 @@ def verify(args) -> None:
         matched = documents["chunk"] if "chunk" in variant else baseline
         for expected, observed in zip(matched["records"], document["records"], strict=True):
             assert expected["case"] == observed["case"]
+            assert [step["items"] for step in expected["steps"]] == [step["items"] for step in observed["steps"]]
             for index in range(len(expected["case"]["requests"])):
                 rid = str(index)
                 left, right = expected["token_ids"].get(rid, []), observed["token_ids"].get(rid, [])
-                if expected["case"]["abort_after"] and index == 0:
-                    assert left[:min(len(left), len(right))] == right[:min(len(left), len(right))]
-                else:
-                    assert left == right
+                assert left == right
         assert document["examples"] == baseline["examples"]
         replay_result = json.loads((args.evidence / variant / f"rank-{args.rank}-replay.json").read_text())
         assert replay_result["cases"] == len(CASES) and not replay_result["cuda_initialized"]

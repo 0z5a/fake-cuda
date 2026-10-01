@@ -18,7 +18,7 @@ The private serving environment pins vLLM 0.30.0, Torch 2.13.0+cu130, Triton 3.7
 | Uniform | Eight requests, prompt 128 / output 16 | Continuous batch, exact token conservation |
 | Heterogeneous | Prompts 32/96/112/192, output 8 | Native schedule metadata and token parity |
 | Two waves | Two prompt-64 requests; two prompt-128 requests after step 2 | Explicit release ordinal, mixed prefill/decode |
-| Decode cancellation | Two prompt-48 requests; cancel first after step 2 | Remaining request finishes; cancelled tokens are a parity prefix |
+| Decode cancellation | Two prompt-48 requests; cancel first after step 2 | Remaining request finishes; matched-policy cancelled tokens match exactly |
 | Prefill cancellation | Two prompt-192 requests; cancel first after step 1 | Chunk mode cancels before first output; exact original Scheduler replay |
 
 Cancellation occurs after a synchronized native step. Concurrent in-flight cancellation and last-use resource release are separately covered by the serving contracts. Releases use completed-step ordinals; these cases do not measure production arrival timing or SLA.
@@ -83,3 +83,5 @@ CUDA_VISIBLE_DEVICES=1 "$PYTHON" tests/integration/tooling/model_functional.py m
 Granite's already verified complete CPU reference can be copied into each new evidence root before verification. The `independent_reference_verified` field records whether that input was actually present; missing reference evidence never becomes an implicit pass. Kimi's full published checkpoint and SHA verification remain mandatory. Its earlier native configuration had a 4096-token scheduling budget; the new finite functional workload uses 512 (64 for chunks), with the same complete 27-layer architecture and 512 MiB KV budget.
 
 On continuation, `region-42.seetacloud.com:38416` returns **Connection refused**. Old SSH handles exiting 255 do not establish the remote download processes' state. Weight completeness, current per-card capacity, foreign GPU processes and any previous queue handoff must be revalidated after reconnecting; no replacement download or GPU worker was started in response to the lost observation channel.
+
+The local continuation audit strengthens matched-policy verification: all six named cases must exist, every scheduled item must match, and cancelled-request token sequences must also match exactly. The complete backed-up TP1 dataset passes. A copied evidence fixture with the cancelled request output removed is correctly rejected; an empty prefix cannot bypass Graph parity. This verifier check supplies no new native GPU result.
