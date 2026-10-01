@@ -1,6 +1,6 @@
 # Complete-checkpoint functional serving matrix
 
-Status: Granite TP1/TP2 functional matrices verified; TP2+EP completes all native/replay cases but fails independent CPU token equality. Kimi's remaining current-memory matrices are pending their coordinated windows. This report extends the [trained TP1 prediction results](topk-model-e2e.md) and [serving/EP contracts](serving-ep.md). No pending native row is a passing E2E result. Native numerical inference is supplied by the original vLLM backend; CPU replay supplies explicit recorded control metadata, not logits or predictions of model quality.
+Status: Granite TP1/TP2 functional matrices verified; TP2+EP completes all native/replay cases but fails independent CPU token equality. Kimi TP1 completes all native/replay cases but fails strict matched-policy Graph token equality; TP2/EP remain queued. This report extends the [trained TP1 prediction results](topk-model-e2e.md) and [serving/EP contracts](serving-ep.md). No pending native row is a passing E2E result. Native numerical inference is supplied by the original vLLM backend; CPU replay supplies explicit recorded control metadata, not logits or predictions of model quality.
 
 ## Checkpoints and execution scope
 
@@ -29,7 +29,7 @@ Eager, full-decode Graph, chunk prefill and Graph+chunk each use their own natur
 
 | Complete checkpoint / topology | Fits current residency | Native variants | Original Scheduler CPU replay | Independent numerical reference |
 | --- | --- | --- | --- | --- |
-| Original Kimi TP1, 512 MiB KV | Yes, replacement H20 idle capacity | Previous homogeneous E2E PASS; new four-variant matrix pending coordinated window | Previous 27 workloads PASS; new matrix pending | Previous native answers No / Paris |
+| Original Kimi TP1, 512 MiB KV | Yes, replacement H20 idle capacity | All four variants × six cases complete; strict matched-policy Graph gate FAIL | 268 scheduled steps, 906 recorded-control reads PASS | Four variants give identical No. / Paris; independent CPU model reference absent |
 | Original Kimi TP2 / EP | Replacement two-card capacity admits the SHA-verified full BF16 weights; native workspace still requires validation | Pending coordinated finite queue | Pending native controls | Pending native comparison |
 | Original Granite TP1 | Yes | All four variants × six cases PASS | 268 scheduled steps, 906 recorded-control reads PASS | Two natural-language prompts × four variants exactly match complete BF16 Transformers CPU reference; no CUDA initialized |
 | Original Granite TP2 | Yes, replacement two-card capacity | All four variants × six cases PASS | Both ranks: 536 scheduled steps, 1,812 recorded-control reads PASS | All eight natural-language outputs per rank exactly match the fresh complete BF16 CPU reference |
@@ -82,13 +82,36 @@ Granite TP2+EP uses the same frozen collector and full checkpoint. Every native 
 
 Independent CPU teacher forcing at the identical first-divergence prefix gives period 32 as top-1, colon 44 as top-2, with a 1.25-logit gap. This measures the CPU reference alone; native logit error and the cause of the difference remain unmeasured. The verifier now saves this exact mismatch before retaining its failing assertion, so diagnostics do not erase the failed gate. No common token trajectory is fabricated, and no metric in this table qualifies speed or prediction accuracy.
 
+The original trained Kimi TP1 matrix uses collector source `e10697e`, SHA-256 `b602834d4436fbef20240fc488800dba17c31270edb39c70a0ede59ed97abc58`. Every native and original-Scheduler replay process exits zero. All 27 layers and `[256,2048,2304]` routed-expert shards are present, with 98,306,228,224 parameter bytes entirely on CUDA; the backend retains BF16 and FP32 parameter types. The complete 20-shard checkpoint is used without quantization, offload or layer reduction. Actual Graph replay counts are 44/43, and both natural-language outputs match across all four modes: `No.` and `Paris`. No independent CPU numerical model reference is supplied for this matrix.
+
+| Kimi TP1 mode | Cases | Steps | Control reads | Actual Graph replays | Peak Torch reserved GiB | Whole native process seconds, including startup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Eager | 6 | 53 | 212 | 0 | 92.5820 | 171.808 |
+| Graph | 6 | 53 | 212 | 44 | 92.3945 | 45.111 |
+| Chunk | 6 | 81 | 241 | 0 | 92.2324 | 42.901 |
+| Graph+chunk | 6 | 81 | 241 | 43 | 92.3027 | 42.444 |
+
+The whole matrix exits **one**, because seven synthetic requests differ between Graph and their matched eager policy. Scheduler items, recorded sampler-control replay, token counts and cancellation still pass. These first divergences are retained; neither their numerical cause nor native logit error has been established:
+
+| Mode / case / request | First different output index, zero based | Matched eager token | Graph token |
+| --- | ---: | ---: | ---: |
+| Graph / uniform / 4 | 9 | 89828 | 16397 |
+| Graph / uniform / 6 | 3 | 33853 | 10726 |
+| Graph / uniform / 7 | 10 | 805 | 16 |
+| Graph / two waves / 3 | 2 | 33853 | 1008 |
+| Graph / prefill cancellation / 1 | 4 | 4170 | 220 |
+| Graph+chunk / two waves / 3 | 2 | 1008 | 33853 |
+| Graph+chunk / prefill cancellation / 1 | 4 | 220 | 4170 |
+
+Five requests also differ between full and chunked eager prefill. The verifier records actual differences before retaining strict failure, without changing native/replay collection. The complete Granite TP2 dataset still passes; Granite EP and Kimi TP1 retain their real failing status. Removing a cancelled request's recorded output also fails and saves the mismatch. No trajectory is normalized or invented. As with Granite, these shared-host startup/JIT observations do not qualify a speedup or extend the earlier frozen timing profile.
+
 Logs, JSON, configuration pickles, native profiles and weights remain outside Git. No process is terminated; queued performance windows, live checkpoint writers and the existing GPU0 lease are respected. Completed task-owned model files are cleaned only after their readers and writers exit naturally.
 
 ## Reproduce the finite matrices
 
 `model_functional.py matrix` runs exactly four independent native variants, then the original CPU Scheduler for every rank, followed by matched-policy Graph and cross-rank replay checks. A failed native/replay process stops the remaining queue after natural exit. It does not impose process timeouts or send termination signals. Each native process keeps the existing model/runner/Scheduler source audit; the orchestration and verifier are separate from the retained measured collector.
 
-Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. These commands reproduce complete-checkpoint matrices in separate evidence directories, each within a confirmed GPU window. Granite has completed the commands below; Kimi's additional matrices are still pending:
+Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. These commands reproduce complete-checkpoint matrices in separate evidence directories, each within a confirmed GPU window. Granite and Kimi TP1 have completed the commands below; Kimi TP2/EP remain pending:
 
 ```sh
 CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \

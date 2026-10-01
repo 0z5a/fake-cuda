@@ -277,7 +277,7 @@ def verify(args) -> None:
                  for variant in ("eager", "graph", "chunk", "graph-chunk")}
     reference_path = args.evidence / "cpu-reference.json"
     baseline = documents["eager"]
-    differences = []
+    differences, matched_differences, natural_differences = [], [], []
     for variant, document in documents.items():
         assert [record["case"]["name"] for record in document["records"]] == [case.name for case in CASES]
         assert (document["tp"], document["ep"]) == (args.tp, args.ep)
@@ -291,8 +291,15 @@ def verify(args) -> None:
             for index in range(len(expected["case"]["requests"])):
                 rid = str(index)
                 left, right = expected["token_ids"].get(rid, []), observed["token_ids"].get(rid, [])
-                assert left == right
-        assert document["examples"] == baseline["examples"]
+                if left != right:
+                    index = next((i for i, (a, b) in enumerate(zip(left, right)) if a != b), min(len(left), len(right)))
+                    matched_differences.append({"variant": variant, "case": expected["case"]["name"], "request": rid,
+                        "first_different_token": index, "expected": left[index:], "observed": right[index:]})
+        for example, (expected, observed) in enumerate(zip(baseline["examples"], document["examples"], strict=True)):
+            assert expected["prompt_token_ids"] == observed["prompt_token_ids"]
+            if expected != observed:
+                natural_differences.append({"variant": variant, "example": example,
+                                            "expected": expected, "observed": observed})
         replay_result = json.loads((args.evidence / variant / f"rank-{args.rank}-replay.json").read_text())
         assert replay_result["cases"] == len(CASES) and not replay_result["cuda_initialized"]
         if "chunk" in variant:
@@ -321,14 +328,18 @@ def verify(args) -> None:
                 index = next((i for i, (a, b) in enumerate(zip(left, right)) if a != b), min(len(left), len(right)))
                 reference_differences.append({"example": example, "first_different_token": index,
                                               "reference": left[index:], "native": right[index:]})
-    (args.evidence / "comparison.json").write_text(json.dumps({"graph_matched_policy_exact": True,
-        "natural_examples_all_variants_exact": True, "independent_reference_present": reference_path.exists(),
+    (args.evidence / "comparison.json").write_text(json.dumps({"graph_matched_policy_exact": not matched_differences,
+        "matched_policy_differences": matched_differences,
+        "natural_examples_all_variants_exact": not natural_differences,
+        "natural_example_differences": natural_differences, "independent_reference_present": reference_path.exists(),
         "independent_reference_verified": reference_path.exists() and not reference_differences,
         "independent_reference_differences": reference_differences,
         "cross_prefill_policy_differences": differences}, sort_keys=True))
-    print("PASS matched-policy Graph parity and original scheduler replay")
     print("Cross-prefill-policy exact-token differences:", differences)
+    assert not matched_differences, matched_differences
+    assert not natural_differences, natural_differences
     assert not reference_differences, reference_differences
+    print("PASS matched-policy Graph parity and original scheduler replay")
 
 
 def matrix(args) -> None:
