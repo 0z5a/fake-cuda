@@ -38,10 +38,13 @@ def main() -> None:
     parser.add_argument("--attention-backend", default="TRITON_ATTN", help="auto lets the native engine select its supported backend")
     parser.add_argument("--load-format", choices=("auto", "dummy"), default="auto")
     parser.add_argument("--gpu-memory-utilization", type=float, default=.55)
+    parser.add_argument("--kv-cache-memory-bytes", type=int, default=1 << 30)
     parser.add_argument("--native-rank", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if version("vllm") != "0.30.0" or args.repeats < 2 or not 0 < args.gpu_memory_utilization <= 1:
+    if version("vllm") != "0.30.0" or args.repeats < 2:
         parser.error("native collector requires vLLM 0.30.0 and at least two repeats")
+    if not 0 < args.gpu_memory_utilization <= 1 or args.kv_cache_memory_bytes <= 0:
+        parser.error("memory fraction must be in (0, 1] and KV bytes must be positive")
     root = args.evidence
     root.mkdir(parents=True, exist_ok=True)
     if args.transport == "socket":
@@ -67,7 +70,7 @@ def main() -> None:
               disable_custom_all_reduce=args.transport == "socket",
               enforce_eager=True, async_scheduling=False, enable_prefix_caching=False,
               enable_chunked_prefill=False, max_model_len=512, max_num_seqs=8 if args.suite != "serving" else 32,
-              max_num_batched_tokens=4096, kv_cache_memory_bytes=1 << 30,
+              max_num_batched_tokens=4096, kv_cache_memory_bytes=args.kv_cache_memory_bytes,
               gpu_memory_utilization=args.gpu_memory_utilization,
               attention_backend=None if args.attention_backend == "auto" else args.attention_backend,
               load_format=args.load_format, trust_remote_code=True, disable_log_stats=True,
@@ -89,6 +92,7 @@ def main() -> None:
             "suite": args.suite, "attention_backend_requested": args.attention_backend,
             "checkpoint": args.load_format != "dummy", "model": str(args.model),
             "gpu_memory_utilization": args.gpu_memory_utilization,
+            "kv_cache_memory_bytes": args.kv_cache_memory_bytes,
             "model_config": config.model_config.hf_config.to_dict(),
             "scope": "whole_step_including_host_and_communication"}))
     mapped = {Path(line.split()[-1]) for line in Path('/proc/self/maps').read_text().splitlines()
@@ -110,9 +114,9 @@ def main() -> None:
         "rank": rank, "pid": os.getpid(), "python": sys.executable,
         "versions": {name: version(name) for name in ("vllm", "torch", "triton", "transformers")},
         "sources": {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(sources)},
-        "device_uuid": subprocess.check_output(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"], text=True).splitlines()[rank],
+        "device_uuid": f"GPU-{torch.cuda.get_device_properties(torch.cuda.current_device()).uuid}",
         "environment": {name: os.environ[name] for name in
-                        ("CUDA_HOME", "CUDA_PATH", "OMP_NUM_THREADS", "VLLM_CACHE_ROOT", "TRITON_CACHE_DIR",
+                        ("CUDA_VISIBLE_DEVICES", "CUDA_HOME", "CUDA_PATH", "OMP_NUM_THREADS", "VLLM_CACHE_ROOT", "TRITON_CACHE_DIR",
                          "FLASHINFER_WORKSPACE_BASE")
                         if name in os.environ}}))
     cpu_group = get_world_group().cpu_group
