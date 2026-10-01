@@ -1,6 +1,6 @@
 # Complete-checkpoint functional serving matrix
 
-Status: Granite TP1/TP2 functional matrices verified; TP2+EP completes all native/replay cases but fails independent CPU token equality. Kimi TP1/TP2 complete all native/replay cases but fail strict matched-policy Graph token equality; EP remains queued. This report extends the [trained TP1 prediction results](topk-model-e2e.md) and [serving/EP contracts](serving-ep.md). No pending native row is a passing E2E result. Native numerical inference is supplied by the original vLLM backend; CPU replay supplies explicit recorded control metadata, not logits or predictions of model quality.
+Status: all six complete-checkpoint matrices have completed native execution and original-Scheduler control replay: 24 variant runs, 40 native rank datasets and 40 CPU rank replays. Granite TP1/TP2 pass strict numerical checks; Granite TP2+EP fails independent CPU token equality. Kimi TP1/TP2/TP2+EP fail strict matched-policy Graph token equality. This report extends the [trained TP1 prediction results](topk-model-e2e.md) and [serving/EP contracts](serving-ep.md). Native numerical inference is supplied by the original vLLM backend; CPU replay supplies explicit recorded control metadata, not logits or predictions of model quality.
 
 ## Checkpoints and execution scope
 
@@ -31,7 +31,7 @@ Eager, full-decode Graph, chunk prefill and Graph+chunk each use their own natur
 | --- | --- | --- | --- | --- |
 | Original Kimi TP1, 512 MiB KV | Yes, replacement H20 idle capacity | All four variants × six cases complete; strict matched-policy Graph gate FAIL | 268 scheduled steps, 906 recorded-control reads PASS | Four variants give identical No. / Paris; independent CPU model reference absent |
 | Original Kimi TP2, 512 MiB total KV | Yes, complete BF16 weights on replacement two-card capacity | All four variants × six cases complete; strict matched-policy Graph gate FAIL | Both ranks: 604 scheduled steps, 1,812 recorded-control reads PASS | Four variants and both ranks agree on No. / Paris; independent CPU model reference absent |
-| Original Kimi TP2+EP | Complete weights admit two-card residency; native workspace remains to be tested | Pending coordinated finite queue | Pending native controls | Pending native comparison |
+| Original Kimi TP2+EP, 512 MiB total KV | Yes, complete trained BF16 expert shards on two cards | All four variants × six cases complete; strict matched-policy Graph gate FAIL | Both ranks: 604 scheduled steps, 1,812 recorded-control reads PASS | Four variants and both ranks agree on No. / Paris; independent CPU model reference absent |
 | Original Granite TP1 | Yes | All four variants × six cases PASS | 268 scheduled steps, 906 recorded-control reads PASS | Two natural-language prompts × four variants exactly match complete BF16 Transformers CPU reference; no CUDA initialized |
 | Original Granite TP2 | Yes, replacement two-card capacity | All four variants × six cases PASS | Both ranks: 536 scheduled steps, 1,812 recorded-control reads PASS | All eight natural-language outputs per rank exactly match the fresh complete BF16 CPU reference |
 | Original Granite TP2+EP | Yes, replacement two-card capacity | All four variants × six cases complete with native status zero; strict independent-reference gate FAIL | Both ranks: 536 scheduled steps, 1,812 recorded-control reads PASS | Paris exactly matches; prime answer diverges at token index 28, zero based |
@@ -134,13 +134,37 @@ Both ranks retain the same strict Graph failure: twelve synthetic requests diffe
 
 The corrected collector synchronizes before the original `core.shutdown()`, which owns distributed-group destruction. Two real CPU/Gloo ranks pass cleanup without initializing CUDA. Native TP2 ranks also exit zero; nonfatal NCCL heartbeat/TCPStore warnings can still appear during teardown and remain in private evidence. No process is signalled or terminated to suppress them.
 
+Kimi TP2+EP uses the same frozen `b518194` collector and original complete checkpoint. All four native parents, eight native ranks and eight CPU replays exit zero. Both ranks contain all 27 layers, `[128,2048,2304]` rank-owned routed-expert shards and 49,189,681,920 CUDA parameter bytes. The declared transport is the original backend's `allgather_reducescatter`, not DeepEP. Cross-rank replay targets, examples, original class-source hashes, package versions and loaded-library hashes match exactly for all four modes. Every mode returns `No.` / `Paris` on both ranks.
+
+| Kimi TP2+EP mode | Cases per rank | Steps per rank | Control reads per rank | Actual Graph replays per rank | Peak Torch reserved GiB per rank | Whole native process seconds, including startup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Eager | 6 | 67 | 212 | 0 | 46.2773 | 52.097 |
+| Graph | 6 | 67 | 212 | 58 | 46.3359 | 49.742 |
+| Chunk | 6 | 84 | 241 | 0 | 46.1953 | 54.030 |
+| Graph+chunk | 6 | 84 | 241 | 45 | 46.2539 | 52.750 |
+
+The whole matrix and both rank verifiers retain exit one for six matched-policy Graph differences; their saved comparisons are byte-identical. Nine requests also differ across full/chunk eager prefill. The first matched-policy differences are:
+
+| Mode / case / request | First different output index, zero based | Matched eager token | Graph token |
+| --- | ---: | ---: | ---: |
+| Graph / uniform / 4 | 9 | 16397 | 89828 |
+| Graph / uniform / 5 | 1 | 382 | 381 |
+| Graph / heterogeneous / 3 | 5 | 15 | 16 |
+| Graph+chunk / uniform / 6 | 3 | 33853 | 10726 |
+| Graph+chunk / uniform / 7 | 3 | 23118 | 3390 |
+| Graph+chunk / two waves / 3 | 2 | 33853 | 1008 |
+
+These strict failures stay separate from exact original-Scheduler replay. Native logits, numerical causes and broader model quality remain unmeasured; passing the two natural examples does not override the synthetic differences. Neither this EP matrix nor its startup times extend the frozen TP1 timing qualification.
+
+All 109 final Kimi native/replay/diagnostic evidence files match their Mac backups byte size and SHA-256. After all model readers/writers naturally exit, 20 complete shards plus obsolete failed-download ranges are removed: 123,158,795,150 bytes across 72 files (114.70 GiB). Granite's complete 2,669,283,096-byte weight file is also removed after its backed-up tests. Configuration/tokenizer metadata and immutable checkpoint identities remain; no model weight is retained for an automatic follow-up.
+
 Logs, JSON, configuration pickles, native profiles and weights remain outside Git. No process is terminated; queued performance windows, live checkpoint writers and the existing GPU0 lease are respected. Completed task-owned model files are cleaned only after their readers and writers exit naturally.
 
 ## Reproduce the finite matrices
 
 `model_functional.py matrix` runs exactly four independent native variants, then the original CPU Scheduler for every rank, followed by matched-policy Graph and cross-rank replay checks. A failed native/replay process stops the remaining queue after natural exit. It does not impose process timeouts or send termination signals. Each native process keeps the existing model/runner/Scheduler source audit; the orchestration and verifier are separate from the retained measured collector.
 
-Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. These commands reproduce complete-checkpoint matrices in separate evidence directories, each within a confirmed GPU window. Granite and Kimi TP1/TP2 have completed the commands below; Kimi EP remains pending:
+Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. All commands below have completed. Reproduction requires restoring and SHA-verifying the original checkpoint weights, separate fresh evidence directories and an explicitly confirmed GPU window:
 
 ```sh
 CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
