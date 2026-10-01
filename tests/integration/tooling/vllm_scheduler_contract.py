@@ -8,6 +8,7 @@ import os
 import sys
 import time
 
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.vllm.costs import Shape, StepModel, StepSample
 from adapters.vllm.runner import Workload, run

@@ -90,6 +90,8 @@ def rank_main(connection: Connection, configuration: Configuration, delay_s: flo
     epoch = 0
     virtual_ns = 0
     try:
+        if torch.cuda.device_count() != 0:
+            raise RuntimeError("CPU ranks require hidden CUDA devices")
         rank = LocalRank(configuration)
         while True:
             command = connection.recv()
@@ -129,13 +131,21 @@ class RankGroup:
         self.pids: set[int] = set()
         if processes:
             context = mp.get_context("spawn")
-            for configuration in configurations:
-                parent, child = context.Pipe()
-                process = context.Process(target=rank_main, args=(child, configuration, delay_s))
-                process.start()
-                child.close()
-                self.connections.append(parent)
-                self.processes.append(process)
+            visibility = os.environ.get("CUDA_VISIBLE_DEVICES")
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""
+            try:
+                for configuration in configurations:
+                    parent, child = context.Pipe()
+                    process = context.Process(target=rank_main, args=(child, configuration, delay_s))
+                    process.start()
+                    child.close()
+                    self.connections.append(parent)
+                    self.processes.append(process)
+            finally:
+                if visibility is None:
+                    del os.environ["CUDA_VISIBLE_DEVICES"]
+                else:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = visibility
 
     def command(self, operation: Operation, virtual_ns: int,
                 arrivals: tuple[tuple[str, int, int, int], ...] = (),

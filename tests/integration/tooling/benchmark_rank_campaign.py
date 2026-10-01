@@ -30,6 +30,8 @@ def main() -> None:
             result = json.loads(subprocess.check_output(
                 command + (["--fresh-ranks"] if mode == "fresh" else []), text=True))
             wall = (time.perf_counter_ns() - begin) / 1e9
+            if result["unsupported"] or len(result["rows"]) != args.limit:
+                raise ValueError("speed comparison requires complete supported workloads")
             if signature is not None and result["semantic_sha256"] != signature:
                 raise ValueError("rank lifecycle optimization changed virtual targets")
             signature = result["semantic_sha256"]

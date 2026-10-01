@@ -8,11 +8,13 @@ import hashlib
 from importlib.metadata import version
 import json
 import math
+import os
 from pathlib import Path
 import pickle
 import statistics
 import sys
 
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.aisimulate.client import AisStepCost
 from adapters.aisimulate.identity import Identity

@@ -80,6 +80,14 @@ def main() -> None:
             "vllm": version("vllm"), "torch": torch.__version__, "cuda": torch.version.cuda,
             "scope": "whole_step_including_host_and_communication"}))
     cpu_group = get_world_group().cpu_group
+    native_pids = [os.getpid()] * args.tp
+    if args.tp > 1:
+        torch.distributed.all_gather_object(native_pids, os.getpid(), group=cpu_group)
+
+    def background_jobs() -> list[str]:
+        snapshot = subprocess.check_output(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid,used_memory",
+                                           "--format=csv,noheader"], text=True)
+        return sorted(line for line in snapshot.splitlines() if int(line.split(",", 1)[0]) not in native_pids)
     native_schedule = scheduler.schedule
     steps: list[dict] = []
     identities: dict[str, str] = {}
@@ -97,6 +105,7 @@ def main() -> None:
         if rank == 0:
             print(f"begin {workload.name} sequences={max_sequences}", flush=True)
         scheduler.max_num_running_reqs = max_sequences
+        background_before = background_jobs() if rank == 0 else []
         if args.tp > 1:
             torch.distributed.barrier(group=cpu_group)
         begin = time.perf_counter_ns()
@@ -133,6 +142,7 @@ def main() -> None:
                 tokens.setdefault(output.request_id, []).extend(
                     [after - begin] * len(output.outputs[0].token_ids))
         finish = time.perf_counter_ns() - begin
+        background_after = background_jobs() if rank == 0 else []
         if rank == 0:
             print(f"finished {workload.name} steps={len(steps)} wall={finish/1e9:.3f}s", flush=True)
         result = ServingResult(finish, tokens, [step["ids"] for step in steps], [], arrivals, 0)
@@ -145,7 +155,8 @@ def main() -> None:
                 raise RuntimeError("native TP rank batch/token mismatch")
         return {"workload": asdict(workload), "max_sequences": max_sequences,
                 "metrics": result.metrics(workload), "steps": list(steps),
-                "tokens": tokens, "arrivals_observed_ns": arrivals}
+                "tokens": tokens, "arrivals_observed_ns": arrivals,
+                "background_jobs_before": background_before, "background_jobs_after": background_after}
 
     collect(Workload("warmup", (0,) * 32, 64, 8), 32)
     calibration = []

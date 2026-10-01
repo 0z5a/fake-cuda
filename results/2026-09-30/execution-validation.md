@@ -54,7 +54,7 @@ Separate cache contracts verify one physical allocation with multiple request re
 |---|---|---|
 | P0/P1/P2 | Existing graph/profile/launch/provider/probe contracts retained; ready replay added | Automatic live code/argument binding and unseen kernel prediction |
 | P3 | Original vLLM 0.30 single-rank CPU scheduling, every oracle control read, native independent calibration/validation | Unmodified U0 framework execution, arbitrary sampling semantics |
-| P4 | Registered actor safe horizon, paced/coordinated pair, dual-rank delay/arrival parity, collective matcher; [independent Scheduler processes and epoch reuse follow-up](../2026-10-01/rank-execution.md) | Arbitrary runtime/OS timer interception and native TP accuracy campaign |
+| P4 | Registered actor safe horizon, paced/coordinated pair, dual-rank delay/arrival parity, collective matcher; [independent Scheduler processes, epoch reuse and completed native TP2 collection](../2026-10-01/rank-execution.md) | Arbitrary runtime/OS timer interception; native TP2 prediction has not met the accuracy target |
 | P5 | Ready ResourceEngine, ordinary allocated-resource occupancy features, shared rates, mutable completion tokens | Per-SM CTA placement and integration with live Driver graph/event completion |
 | P6 | Global node/device identity, explicit process mapping, 1/2/4/8N topology fixtures, ring and shared-path flow baseline | Hardware catalog/placement generator with measured NIC/NUMA/topology discovery; arbitrary transports |
 | P7 | Unique physical/cache ledgers, transfer gate, delayed visibility and original KV budget feedback | Live prefix events and measured native Graph-pool allocation tracking |

@@ -45,7 +45,7 @@ The first comparison scores duration, throughput, median/P95 TTFT and ITL, unsup
 
 ## Independent rank processes
 
-`RankGroup(configurations, processes=True)` places each original Scheduler/KV manager in its own CPU process. Pass it as `ranks=` to `run`; reuse it for a sweep and call `close()` afterward. Every run resets scheduler/KV/control state under a new epoch. Replies carry epoch, sequence and virtual time; all ranks reply before safe-point certification. Transport latency is simulator wall time. Closing pipes delivers EOF; workers are joined without termination signals.
+`RankGroup(configurations, processes=True)` places each original Scheduler/KV manager in its own CPU process. Pass it as `ranks=` to `run`; reuse it for a sweep and call `close()` afterward. Every run resets scheduler/KV/control state under a new epoch. Replies carry epoch, sequence and virtual time; all ranks reply before safe-point certification. Transport latency is simulator wall time. Spawned ranks inherit hidden CUDA devices, and CPU campaign entry points hide devices before framework imports. Closing pipes delivers EOF; workers are joined without termination signals.
 
 ```sh
 /path/to/vllm-python tests/integration/tooling/rank_campaign.py \
@@ -59,7 +59,11 @@ The first comparison scores duration, throughput, median/P95 TTFT and ITL, unsup
 
 The campaign compares every process-backed timeline against its local original-scheduler oracle. The benchmark compares rank startup per workload with explicit epoch reuse, including complete fresh-interpreter startup/fit/IPC/teardown in both modes. [Process correctness, retained prediction accuracy and measured speed](../results/2026-10-01/rank-execution.md).
 
-Native collection accepts `--tp 2` using one externally launched original vLLM engine per GPU, synchronized admissions and a native batch/token-count consistency check. `--transport socket` explicitly disables NCCL P2P/SHM and custom all-reduce; record it as a distinct calibration condition. These options add a collection path, not a validated TP2 predictor: the current machine has not completed native TP2 calibration/validation. The AIS regression remains qualified for TP1 only.
+Native collection accepts `--tp 2` using one externally launched original vLLM engine per GPU, synchronized admissions and a native batch/token-count consistency check. `--transport socket` explicitly disables NCCL P2P/SHM and custom all-reduce; record it as a distinct calibration condition. Two native Socket campaigns completed, but TP2 prediction failed the 10% accuracy target. The AIS regression remains qualified for TP1 only.
+
+The collector records other GPU process IDs, UUIDs and memory before/after each workload, outside its timing boundary. `rank_campaign.py` discards changed calibration conditions and freezes a separate predictor for each observed condition before opening validation measurements. Changed/incomplete validation observations, unknown conditions and unsupported shapes retain their steps in total coverage but receive no score. Both missing snapshots identify legacy input explicitly; matching endpoint snapshots do not establish equivalent utilization or communication contention throughout a workload.
+
+`rank_conditions_contract.py` accepts the campaign's `--evidence`, `--config-sha256` and `--bridge` arguments. With retained legacy TP1 input, it verifies condition isolation, unchanged supported predictions despite poisoned changed-condition samples, snapshot-order invariance, unsupported coverage and unknown error at zero coverage.
 
 ## Contracts
 

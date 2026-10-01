@@ -3,17 +3,30 @@ import argparse
 import hashlib
 from importlib.metadata import version
 import json
+import os
 from pathlib import Path
 import pickle
-import statistics
 import sys
 import time
 
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from adapters.vllm.costs import Shape, StepModel, StepSample
+from adapters.vllm.costs import Shape, StepModel, StepSample, UnsupportedStep
 from adapters.vllm.ranks import RankGroup
 from adapters.vllm.runner import Workload, run
 from sweep_serving import tails
+
+
+def condition(case: dict) -> tuple[str, ...] | None:
+    keys = ("background_jobs_before", "background_jobs_after")
+    if all(key not in case for key in keys):
+        return None  # Legacy evidence has no observed load qualification.
+    if any(key not in case for key in keys):
+        raise UnsupportedStep("incomplete background observations")
+    before, after = (tuple(sorted(case[key])) for key in keys)
+    if before != after:
+        raise UnsupportedStep("background changed during workload")
+    return before
 
 
 def main() -> None:
@@ -35,9 +48,18 @@ def main() -> None:
         parser.error("trusted configuration digest mismatch")
     config, kv, block, hashed = pickle.loads(data)
     tp = config.parallel_config.tensor_parallel_size
-    samples = [StepSample(Shape(**step["shape"]), step["duration_ns"])
-               for case in json.loads((root / "calibration.json").read_text()) for step in case["steps"]]
-    model = StepModel(samples)
+    calibration = json.loads((root / "calibration.json").read_text())
+    samples: dict[tuple[str, ...] | None, list[StepSample]] = {}
+    rejected_calibration = 0
+    for case in calibration:
+        try:
+            key = condition(case)
+        except UnsupportedStep:
+            rejected_calibration += 1
+            continue
+        samples.setdefault(key, []).extend(StepSample(Shape(**step["shape"]), step["duration_ns"])
+                                            for step in case["steps"])
+    models = {key: StepModel(values) for key, values in samples.items()}
     # Fit before opening the held-out measurements; no validation refitting.
     validation = json.loads((root / "validation.json").read_text())
     if args.limit is not None:
@@ -47,14 +69,25 @@ def main() -> None:
     rows = []
     digest = hashlib.sha256()
     coverage = [0, 0., 0., 0.]
+    unsupported = []
+    total_steps = 0
     try:
         for case in validation:
+            total_steps += len(case["steps"])
+            try:
+                model = models.get(condition(case))
+                if model is None:
+                    raise UnsupportedStep("uncalibrated background condition")
+                predictions = [model.predict(Shape(**step["shape"])) for step in case["steps"]]
+            except UnsupportedStep as error:
+                unsupported.append({"workload": case["workload"]["name"], "max_sequences": case["max_sequences"],
+                                    "reason": str(error), "steps": len(case["steps"])})
+                continue
             workload = Workload(**{**case["workload"], "arrivals_ns": tuple(case["workload"]["arrivals_ns"])})
             for configuration, kv, block, hashed in configurations:
                 configuration.scheduler_config.max_num_seqs = case["max_sequences"]
-            for step in case["steps"]:
+            for step, predicted in zip(case["steps"], predictions):
                 observed = step["duration_ns"]
-                predicted = model.predict(Shape(**step["shape"]))
                 coverage[0] += 1
                 coverage[1] += abs(predicted - observed)
                 coverage[2] += observed
@@ -85,8 +118,11 @@ def main() -> None:
         if group is not None:
             group.close()
     print(json.dumps({"tp": tp, "fresh_ranks": args.fresh_ranks, "rows": rows,
-        "covered_steps": int(coverage[0]), "step_wape_percent": 100 * coverage[1] / coverage[2],
-        "step_mape_percent": 100 * coverage[3] / coverage[0], "semantic_sha256": digest.hexdigest(),
+        "covered_steps": int(coverage[0]), "total_steps": total_steps, "unsupported": unsupported,
+        "rejected_calibration_runs": rejected_calibration, "calibrated_conditions": len(models),
+        "legacy_calibration": None in models,
+        "step_wape_percent": 100 * coverage[1] / coverage[2] if coverage[2] else None,
+        "step_mape_percent": 100 * coverage[3] / coverage[0] if coverage[0] else None, "semantic_sha256": digest.hexdigest(),
         "campaign_s": (time.perf_counter_ns() - started) / 1e9}))
 
 
