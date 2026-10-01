@@ -61,3 +61,25 @@ Both native selections are among the CPU reference's top two at the first diverg
 The actual native collector SHA-256 is `9f4231add7efe35332d6010b5920ec08e0a0e1eacedcad6e7ae2b2bee643c582`. Its exact source snapshot is retained outside Git. Subsequent edits add the cross-policy comparison and independent CPU teacher-forcing diagnostic; the native collection function is unchanged. No speed improvement or new prediction-accuracy claim follows from recorded native sampler replay. Existing independent whole-model timing accuracy and equal-target CPU simulator speed tables retain their original boundaries.
 
 Logs, JSON, configuration pickles, native profiles and weights remain outside Git. No process is terminated; queued performance windows, live checkpoint writers and the existing GPU0 lease are respected. Completed task-owned model files are cleaned only after their readers and writers exit naturally.
+
+## Reproduce the remaining finite matrices
+
+`model_functional.py matrix` runs exactly four independent native variants, then the original CPU Scheduler for every rank, followed by matched-policy Graph and cross-rank replay checks. A failed native/replay process stops the remaining queue after natural exit. It does not impose process timeouts or send termination signals. Each native process keeps the existing model/runner/Scheduler source audit; the orchestration and verifier are separate from the retained measured collector.
+
+Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. The following commands specify complete checkpoint directories and evidence destinations; they require a newly confirmed idle GPU window. They are **remaining commands**, not completed runs:
+
+```sh
+CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
+  --model "$GRANITE_CHECKPOINT" --evidence "$RAW/granite-tp2" \
+  --tp 2 --attention-backend TRITON_ATTN
+CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
+  --model "$GRANITE_CHECKPOINT" --evidence "$RAW/granite-ep2" \
+  --tp 2 --ep --attention-backend TRITON_ATTN
+CUDA_VISIBLE_DEVICES=1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
+  --model "$KIMI_CHECKPOINT" --evidence "$RAW/kimi-functional" \
+  --kv-bytes 536870912 --memory-fraction .97 --trust-model-code
+```
+
+Granite's already verified complete CPU reference can be copied into each new evidence root before verification. The `independent_reference_verified` field records whether that input was actually present; missing reference evidence never becomes an implicit pass. Kimi's full published checkpoint and SHA verification remain mandatory. Its earlier native configuration had a 4096-token scheduling budget; the new finite functional workload uses 512 (64 for chunks), with the same complete 27-layer architecture and 512 MiB KV budget.
+
+On continuation, `region-42.seetacloud.com:38416` returns **Connection refused**. Old SSH handles exiting 255 do not establish the remote download processes' state. Weight completeness, current per-card capacity, foreign GPU processes and any previous queue handoff must be revalidated after reconnecting; no replacement download or GPU worker was started in response to the lost observation channel.

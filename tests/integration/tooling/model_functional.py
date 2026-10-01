@@ -276,6 +276,7 @@ def verify(args) -> None:
     baseline = documents["eager"]
     differences = []
     for variant, document in documents.items():
+        assert (document["tp"], document["ep"]) == (args.tp, args.ep)
         assert document["source_sha256"] == baseline["source_sha256"]
         assert document["identity"]["model_config_sha256"] == baseline["identity"]["model_config_sha256"]
         assert document["parameter_bytes"] == baseline["parameter_bytes"]
@@ -314,9 +315,58 @@ def verify(args) -> None:
             assert expected["prompt_token_ids"] == observed["prompt_token_ids"]
             assert expected["token_ids"] == observed["token_ids"]
     (args.evidence / "comparison.json").write_text(json.dumps({"graph_matched_policy_exact": True,
-        "natural_examples_all_variants_exact": True, "cross_prefill_policy_differences": differences}, sort_keys=True))
+        "natural_examples_all_variants_exact": True, "independent_reference_verified": reference_path.exists(),
+        "cross_prefill_policy_differences": differences}, sort_keys=True))
     print("PASS matched-policy Graph parity, original scheduler replay and available independent reference")
     print("Cross-prefill-policy exact-token differences:", differences)
+
+
+def matrix(args) -> None:
+    """Finite independent native processes followed by original CPU rank replay."""
+    args.evidence.mkdir(parents=True, exist_ok=True)
+    script = Path(__file__).resolve()
+    source = hashlib.sha256(script.read_bytes()).hexdigest()
+    rows = []
+    for variant in ("eager", "graph", "chunk", "graph-chunk"):
+        assert hashlib.sha256(script.read_bytes()).hexdigest() == source
+        target = args.evidence / variant
+        target.mkdir(exist_ok=True)
+        command = [sys.executable, str(script), "native", "--model", str(args.model),
+                   "--evidence", str(target), "--variant", variant, "--tp", str(args.tp),
+                   "--kv-bytes", str(args.kv_bytes), "--memory-fraction", str(args.memory_fraction),
+                   "--attention-backend", args.attention_backend]
+        if args.ep:
+            command.append("--ep")
+        if args.trust_model_code:
+            command.append("--trust-model-code")
+        start = time.perf_counter_ns()
+        with (target / "native.log").open("w") as output:
+            status = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT).returncode
+        row = {"variant": variant, "native_status": status, "wall_ns": time.perf_counter_ns() - start}
+        rows.append(row)
+        for rank in range(args.tp) if status == 0 else ():
+            config = (target / f"rank-{rank}-scheduler.pkl").read_bytes()
+            command = [sys.executable, str(script), "replay", "--evidence", str(target),
+                       "--rank", str(rank), "--config-sha256", hashlib.sha256(config).hexdigest()]
+            with (target / f"replay-{rank}.log").open("w") as output:
+                status = subprocess.run(command, env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+                                        stdout=output, stderr=subprocess.STDOUT).returncode
+            row[f"replay_{rank}_status"] = status
+            if status:
+                break
+        (args.evidence / "matrix-processes.json").write_text(json.dumps({"source_sha256": source,
+            "pid": os.getpid(), "rows": rows}, sort_keys=True))
+        print(row, flush=True)
+        if status:
+            raise SystemExit(status)
+    for rank in range(args.tp):
+        args.rank = rank
+        verify(args)
+    for variant in ("eager", "graph", "chunk", "graph-chunk"):
+        ranks = [json.loads((args.evidence / variant / f"rank-{rank}-replay.json").read_text())
+                 for rank in range(args.tp)]
+        assert len({r["target_sha256"] for r in ranks}) == 1
+    print("PASS finite native/CPU matrix and cross-rank replay targets")
 
 
 def reference_trace(args) -> None:
@@ -354,7 +404,7 @@ def reference_trace(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("native", "replay", "reference", "verify", "reference-trace"))
+    parser.add_argument("mode", choices=("native", "replay", "reference", "verify", "reference-trace", "matrix"))
     parser.add_argument("--model", type=Path)
     parser.add_argument("--variant", choices=("eager", "graph", "chunk", "graph-chunk"), default="eager")
     parser.add_argument("--tp", type=int, choices=(1, 2), default=1)
@@ -369,7 +419,7 @@ def main() -> None:
     parser.add_argument("--config-sha256")
     args = parser.parse_args()
     {"native": native, "replay": replay, "reference": reference, "verify": verify,
-     "reference-trace": reference_trace}[args.mode](args)
+     "reference-trace": reference_trace, "matrix": matrix}[args.mode](args)
 
 
 if __name__ == "__main__":
