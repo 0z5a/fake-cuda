@@ -61,8 +61,7 @@ def native(args) -> None:
     import torch
     from vllm import LLM, SamplingParams
     from vllm.config import CUDAGraphMode
-    from vllm.distributed.parallel_state import (
-        destroy_distributed_environment, destroy_model_parallel, get_world_group)
+    from vllm.distributed.parallel_state import get_world_group
     from vllm.sampling_params import RequestOutputKind
     from vllm.v1.engine.core import resolve_kv_cache_block_sizes
     if args.tp > 1 and args.native_rank is None:
@@ -199,11 +198,9 @@ def native(args) -> None:
                                              group=get_world_group().cpu_group)
         assert len(set(digests)) == 1
     (args.evidence / f"rank-{rank}-native.json").write_text(json.dumps(document, sort_keys=True))
-    core.shutdown()
     if args.tp > 1:
         torch.distributed.barrier(group=get_world_group().cpu_group)
-    destroy_model_parallel()
-    destroy_distributed_environment()
+    core.shutdown()
 
 
 def replay(args) -> None:

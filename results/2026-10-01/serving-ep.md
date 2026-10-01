@@ -113,7 +113,7 @@ Raw sessions, frozen/qualified profiles, actual collector source snapshots and d
 | P5 / M2 | Request/memory/cancellation contracts; homogeneous trained whole-step subset independently replayed |
 | P6.1/2/4/5 | Explicit EP ledger, declared topology, capacity sharing, remaining-work updates and chunk buffer lifetime |
 | P6.3 | Independently qualified native P2P+GEMM/KDA discrete combinations on these two H20s |
-| Further native validation | Full-model heterogeneous/continued chunks, trained TP2/EP, real DeepEP/topology demands and broader cold/rotating/backend timing |
+| Further native validation | Kimi continued/chunk/Graph and trained TP2/EP matrices; real DeepEP/topology demands and broader cold/rotating/backend timing |
 | Later extensions | Historical-token selector timing and complete production attention-module attribution |
 
-The partial module trace cannot supply a full-model attention fraction. The complete trained TP1 E2E is established; trained TP2/EP remains unqualified while the large GPU0 lease prevents the required residency. These domains stay unsupported rather than inheriting surrogate costs.
+The partial module trace cannot supply a full-model attention fraction. The trained Kimi TP1 timing E2E is established on the original host. The replacement host admits its full TP2/EP weights, with additional finite matrices queued separately. Complete Granite TP1/TP2 control matrices pass; Granite TP2+EP completes native/replay cases but fails independent CPU token equality. The [complete-checkpoint report](model-functional.md) records these results. Recorded native controls establish scheduler contracts, not new timing qualification for heterogeneous chunks or distributed model steps; those costs remain unsupported until independently measured.

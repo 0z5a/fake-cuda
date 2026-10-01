@@ -30,7 +30,7 @@ Eager, full-decode Graph, chunk prefill and Graph+chunk each use their own natur
 | Complete checkpoint / topology | Fits current residency | Native variants | Original Scheduler CPU replay | Independent numerical reference |
 | --- | --- | --- | --- | --- |
 | Original Kimi TP1, 512 MiB KV | Yes, replacement H20 idle capacity | Previous homogeneous E2E PASS; new four-variant matrix pending coordinated window | Previous 27 workloads PASS; new matrix pending | Previous native answers No / Paris |
-| Original Kimi TP2 / EP | Replacement two-card capacity admits the full BF16 weights; native workspace still requires validation | Pending complete checkpoint and coordinated finite queue | Pending native controls | Pending native comparison |
+| Original Kimi TP2 / EP | Replacement two-card capacity admits the SHA-verified full BF16 weights; native workspace still requires validation | Pending coordinated finite queue | Pending native controls | Pending native comparison |
 | Original Granite TP1 | Yes | All four variants × six cases PASS | 268 scheduled steps, 906 recorded-control reads PASS | Two natural-language prompts × four variants exactly match complete BF16 Transformers CPU reference; no CUDA initialized |
 | Original Granite TP2 | Yes, replacement two-card capacity | All four variants × six cases PASS | Both ranks: 536 scheduled steps, 1,812 recorded-control reads PASS | All eight natural-language outputs per rank exactly match the fresh complete BF16 CPU reference |
 | Original Granite TP2+EP | Yes, replacement two-card capacity | All four variants × six cases complete with native status zero; strict independent-reference gate FAIL | Both ranks: 536 scheduled steps, 1,812 recorded-control reads PASS | Paris exactly matches; prime answer diverges at token index 28, zero based |
@@ -84,11 +84,11 @@ Independent CPU teacher forcing at the identical first-divergence prefix gives p
 
 Logs, JSON, configuration pickles, native profiles and weights remain outside Git. No process is terminated; queued performance windows, live checkpoint writers and the existing GPU0 lease are respected. Completed task-owned model files are cleaned only after their readers and writers exit naturally.
 
-## Reproduce the remaining finite matrices
+## Reproduce the finite matrices
 
 `model_functional.py matrix` runs exactly four independent native variants, then the original CPU Scheduler for every rank, followed by matched-policy Graph and cross-rank replay checks. A failed native/replay process stops the remaining queue after natural exit. It does not impose process timeouts or send termination signals. Each native process keeps the existing model/runner/Scheduler source audit; the orchestration and verifier are separate from the retained measured collector.
 
-Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. The following commands specify complete checkpoint directories and evidence destinations; they require a newly confirmed idle GPU window. They are **remaining commands**, not completed runs:
+Use the pinned private serving Python and CUDA 13.0 toolchain/cache environment from the protocol above. These commands reproduce complete-checkpoint matrices in separate evidence directories, each within a confirmed GPU window. Granite has completed the commands below; Kimi's additional matrices are still pending:
 
 ```sh
 CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
@@ -97,9 +97,15 @@ CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py
 CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
   --model "$GRANITE_CHECKPOINT" --evidence "$RAW/granite-ep2" \
   --tp 2 --ep --attention-backend TRITON_ATTN
-CUDA_VISIBLE_DEVICES=1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
+CUDA_VISIBLE_DEVICES=0 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
   --model "$KIMI_CHECKPOINT" --evidence "$RAW/kimi-functional" \
   --kv-bytes 536870912 --memory-fraction .97 --trust-model-code
+CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
+  --model "$KIMI_CHECKPOINT" --evidence "$RAW/kimi-tp2" \
+  --tp 2 --kv-bytes 536870912 --memory-fraction .55 --trust-model-code
+CUDA_VISIBLE_DEVICES=0,1 "$PYTHON" tests/integration/tooling/model_functional.py matrix \
+  --model "$KIMI_CHECKPOINT" --evidence "$RAW/kimi-ep2" \
+  --tp 2 --ep --kv-bytes 536870912 --memory-fraction .55 --trust-model-code
 ```
 
 Granite's already verified complete CPU reference can be copied into each new evidence root before verification. The `independent_reference_verified` field records whether that input was actually present; missing reference evidence never becomes an implicit pass. Kimi's full published checkpoint and SHA verification remain mandatory. Its earlier native configuration had a 4096-token scheduling budget; the new finite functional workload uses 512 (64 for chunks), with the same complete 27-layer architecture and 512 MiB KV budget.
