@@ -63,6 +63,7 @@ class ModelFunctionalContract(unittest.TestCase):
         for rank in (0, 1):
             self.check(rank)
             self.assertTrue(self.comparison()["original_scheduler_replay_verified"])
+            self.assertTrue(self.comparison()["native_recorded_outputs_verified"])
         self.assertNotIn("torch", sys.modules)
         self.assertNotIn("vllm", sys.modules)
 
@@ -110,8 +111,37 @@ class ModelFunctionalContract(unittest.TestCase):
             self.check()
         comparison = self.comparison()
         self.assertTrue(comparison["original_scheduler_replay_verified"])
+        self.assertFalse(comparison["native_recorded_outputs_verified"])
         self.assertFalse(comparison["graph_matched_policy_exact"])
         self.assertEqual(comparison["matched_policy_differences"][0]["request"], "0")
+
+    def test_coherent_output_edits_cannot_hide_sampled_tokens(self):
+        for pair in (("eager", "graph"), ("chunk", "graph-chunk")):
+            for rank in (0, 1):
+                for tokens in (None, [999]):
+                    with self.subTest(pair=pair, rank=rank, tokens=tokens):
+                        originals = {}
+                        for variant in pair:
+                            path = self.evidence / variant / f"rank-{rank}-native.json"
+                            originals[path] = path.read_text()
+                            document = json.loads(originals[path])
+                            record = next(r for r in document["records"] if r["case"]["name"] == "cancel-decode")
+                            if tokens is None:
+                                del record["token_ids"]["0"]
+                            else:
+                                record["token_ids"]["0"] = tokens
+                            self.write(path, document)
+                        with self.assertRaises(AssertionError):
+                            self.check(rank)
+                        comparison = self.comparison()
+                        self.assertTrue(comparison["graph_matched_policy_exact"])
+                        self.assertTrue(comparison["original_scheduler_replay_verified"])
+                        self.assertFalse(comparison["native_recorded_outputs_verified"])
+                        self.assertEqual(comparison["native_recorded_output_differences"],
+                                         [{"variant": variant, "case": "cancel-decode", "request": "0",
+                                           "sampled_tokens": [100], "reported_tokens": tokens or []} for variant in pair])
+                        for path, content in originals.items():
+                            path.write_text(content)
 
 
 if __name__ == "__main__":
