@@ -2,6 +2,8 @@
 
 The completed synchronized control passes **28/34 observations** and fails six direct peer observations. Explicit pinned-host staging passes in both directions. Direct peer data correctness remains unqualified on this host; FakeCUDA and Torch are absent from the copy process.
 
+A later, separate legacy-context mapping fixture passes 42/42 pointer/state checks and verifies all 16 source uploads and destination resets. Its eight writes toward the peer pass; eight reads from the peer fail with 4096/4096 mismatches across eager and Graph replay. Its conditions/counts remain separate from the control below. [A100 mapping and SM120 simulator/native validation](peer-mapping-sm120.md).
+
 ## Completed control
 
 Every observation compares all 4096 FP32 elements (16 KiB) exactly. Changed-input Graph replay uses `0.125`, `-0.75` and `2.0`. Before each upload or device copy, a zero reset, context completion and full host readback verify the relevant buffer's starting contents. All **34 reset checks pass**. The native process completes cleanup and naturally exits 1 because six numerical checks fail.
