@@ -1,7 +1,6 @@
 #include "impl/core.h"
 #include "impl/private.h"
 #include "impl/virtual_work_internal.h"
-#include "profile/gh200.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -12,39 +11,35 @@
 
 
 namespace fake_cuda {
-int Device::count() noexcept {
-    static const int configured = [] {
-        const char *text = std::getenv("FAKE_CUDA_DEVICE_COUNT");
-        return text && text[0] >= '1' && text[0] <= '8' && text[1] == '\0'
-                   ? text[0] - '0' : 1;
-    }();
-    return configured;
-}
+int Device::count() noexcept { return device_configuration().count; }
 bool Device::valid(CUdevice ordinal) noexcept { return ordinal >= 0 && ordinal < count(); }
 
 CUresult Device::name(char *out, int size) const {
     if (!out || size <= 0) return CUDA_ERROR_INVALID_VALUE;
-    std::snprintf(out, static_cast<size_t>(size), "%s", gh200::name);
+    std::snprintf(out, static_cast<size_t>(size), "%s", profile_.name.c_str());
     return CUDA_SUCCESS;
 }
 CUresult Device::uuid(CUuuid *out) const {
     if (!out) return CUDA_ERROR_INVALID_VALUE;
     const unsigned char id[16] = {'F','A','K','E','-','C','U','D','A',0,0,0,0,0,0,1};
     std::memcpy(out->bytes, id, sizeof(id));
-    out->bytes[15] = static_cast<char>(ordinal_ + 1);
+    const auto id_ordinal = static_cast<unsigned int>(ordinal_ + 1);
+    for (unsigned int i = 0; i < 4; ++i)
+        out->bytes[15 - i] = static_cast<char>(id_ordinal >> (i * 8));
     return CUDA_SUCCESS;
 }
 CUresult Device::memory(size_t *out) const {
     if (!out) return CUDA_ERROR_INVALID_VALUE;
-    *out = gh200::memory_bytes;
+    *out = profile_.memory_bytes;
     return CUDA_SUCCESS;
 }
 CUresult Device::attribute(int *out, CUdevice_attribute attribute) const {
     if (!out) return CUDA_ERROR_INVALID_VALUE;
-    if (static_cast<int>(attribute) < 1 ||
-        static_cast<size_t>(attribute) >= sizeof(gh200::attributes) / sizeof(gh200::attributes[0]))
-        return CUDA_ERROR_INVALID_VALUE;
-    *out = gh200::attributes[attribute];
+    if (attribute < 1) return CUDA_ERROR_INVALID_VALUE;
+    const auto found = profile_.attributes.find(attribute);
+    if (found == profile_.attributes.end())
+        return attribute >= CU_DEVICE_ATTRIBUTE_MAX ? CUDA_ERROR_INVALID_VALUE : CUDA_ERROR_NOT_SUPPORTED;
+    *out = found->second;
     return CUDA_SUCCESS;
 }
 
@@ -58,7 +53,7 @@ Stream::Stream(std::shared_ptr<Context> context, unsigned int flags, int priorit
     : handle_id_(handle_id), context_(std::move(context)), flags_(flags), priority_(priority) {}
 
 thread_local Registry::ThreadState Registry::thread_;
-Registry::Registry() {
+Registry::Registry() : devices_(Device::count()) {
     for (int ordinal = 0; ordinal < Device::count(); ++ordinal)
         devices_[ordinal] = std::make_shared<Device>(ordinal);
 }
@@ -318,7 +313,7 @@ CUresult Registry::peer_enable(CUcontext peer, unsigned int flags) {
     auto current = selected_locked();
     auto other = live_locked(peer);
     if (!current || !other || current == other) return CUDA_ERROR_INVALID_CONTEXT;
-    if (current->device_ordinal() == other->device_ordinal())
+    if (!device_configuration().can_access(current->device_ordinal(), other->device_ordinal()))
         return CUDA_ERROR_PEER_ACCESS_UNSUPPORTED;
     try {
         auto& enabled = peers_[current->handle()];
@@ -416,7 +411,7 @@ Device *virtual_core_device(CUdevice ordinal) { return registry.device(ordinal);
 }
 
 extern "C" {
-CUresult core_init(unsigned int flags) { return flags ? CUDA_ERROR_INVALID_VALUE : CUDA_SUCCESS; }
+CUresult core_init(unsigned int flags) { return flags ? CUDA_ERROR_INVALID_VALUE : fake_cuda::device_configuration().status; }
 CUresult core_version(int *version) {
     if (!version) return CUDA_ERROR_INVALID_VALUE;
     *version = 13020;
@@ -425,7 +420,7 @@ CUresult core_version(int *version) {
 CUresult core_count(int *count) {
     if (!count) return CUDA_ERROR_INVALID_VALUE;
     *count = fake_cuda::Device::count();
-    return CUDA_SUCCESS;
+    return fake_cuda::device_configuration().status;
 }
 CUresult core_device(CUdevice *device, int ordinal) {
     if (!device) return CUDA_ERROR_INVALID_VALUE;
@@ -457,7 +452,7 @@ CUresult core_can_access_peer(int *out, CUdevice device, CUdevice peer) {
     if (!out) return CUDA_ERROR_INVALID_VALUE;
     if (!fake_cuda::Device::valid(device) || !fake_cuda::Device::valid(peer))
         return CUDA_ERROR_INVALID_DEVICE;
-    *out = device != peer ? 1 : 0;
+    *out = fake_cuda::device_configuration().can_access(device, peer);
     return CUDA_SUCCESS;
 }
 CUresult core_primary_get(CUcontext *out, CUdevice device) { return registry.primary_get(out, device, false); }

@@ -4,7 +4,6 @@
 #include "device.h"
 #include "stream.h"
 
-#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -69,7 +68,7 @@ private:
 
     std::mutex mutex_;
     std::uintptr_t next_handle_ = 4096;
-    std::array<std::shared_ptr<Device>, Device::max_devices> devices_;
+    std::vector<std::shared_ptr<Device>> devices_;
     std::unordered_map<CUcontext, std::shared_ptr<Context>> contexts_;
     // Directed peer access: source context -> destination contexts.
     std::map<CUcontext, std::set<CUcontext>> peers_;

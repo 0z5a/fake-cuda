@@ -3,7 +3,9 @@
 
 #include "virtual_types.h"
 
-#include <array>
+#include "device.h"
+
+#include <vector>
 #include <map>
 
 namespace fake_cuda::detail {
@@ -33,7 +35,7 @@ private:
     std::multimap<Time, CUdeviceptr> releases;
     std::map<CUdeviceptr, Allocation> allocations;
     std::uint64_t next_address = 0x100000000000ULL;
-    std::array<size_t, 8> used{};
+    std::vector<size_t> used = std::vector<size_t>(Device::count());
 };
 } // namespace fake_cuda::detail
 

@@ -1,11 +1,11 @@
 #include "impl/virtual_memory.h"
-#include "profile/gh200.h"
+#include "impl/virtual_work_internal.h"
 
 #include <algorithm>
 #include <limits>
 
 namespace fake_cuda::detail {
-size_t VirtualMemory::free_bytes(CUdevice ordinal) const { return gh200::memory_bytes - used[ordinal]; }
+size_t VirtualMemory::free_bytes(CUdevice ordinal) const { return virtual_core_device(ordinal)->profile().memory_bytes - used[ordinal]; }
 bool VirtualMemory::can_allocate(CUdevice ordinal, size_t bytes) const {
     return bytes <= free_bytes(ordinal) &&
            bytes <= std::numeric_limits<std::uint64_t>::max() - next_address - 256;

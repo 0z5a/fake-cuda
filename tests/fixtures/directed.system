@@ -1,0 +1,12 @@
+# Synthetic directed access fixture, not a hardware topology.
+schema=1
+source=synthetic directed access
+device.0=synthetic.profile
+device.1=synthetic-small.profile
+device.2=synthetic.profile
+peer.0.1=1
+peer.0.2=0
+peer.1.0=0
+peer.1.2=1
+peer.2.0=1
+peer.2.1=0

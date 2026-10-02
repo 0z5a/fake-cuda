@@ -44,7 +44,7 @@ static double bandwidth(const char *name, double fallback) {
 }
 VirtualClock::duration QueueScheduler::duration(Kind kind, size_t bytes) {
     if (kind == Kind::marker || kind == Kind::record || kind == Kind::wait) return VirtualClock::duration::zero();
-    if (kind == Kind::kernel) return std::chrono::milliseconds(10);
+    if (kind == Kind::kernel) return synthetic_kernel_prediction().service_time;
     double bw = kind == Kind::h2d ? bandwidth("FAKE_CUDA_H2D_BW_GBPS", 358.0) :
                 kind == Kind::d2h ? bandwidth("FAKE_CUDA_D2H_BW_GBPS", 296.2) :
                 kind == Kind::peer ? bandwidth("FAKE_CUDA_P2P_BW_GBPS", 50.0) : // modeling parameter, not measured
@@ -84,10 +84,10 @@ Time QueueScheduler::earliest_peer(Key key, CUdevice src, CUdevice dst,
     device_for(key.context);
     if (src == dst)
         return earliest_on(key, &virtual_core_device(dst)->compute_queue, dependency, current);
-    return earliest_on(key, &virtual_core_device(src)->p2p_queues.at(dst), dependency, current);
+    return earliest_on(key, &virtual_core_device(src)->p2p_queues[dst], dependency, current);
 }
 OpPtr QueueScheduler::schedule_on(Key key, Kind kind, size_t bytes, const OpPtr &dependency,
-                                  Time current, ExecutionQueue *resource_queue) {
+                                  Time current, ExecutionQueue *resource_queue, const PredictorResult *prediction) {
     auto op = std::make_shared<Op>();
     op->context = key.context;
     op->stream = key.stream;
@@ -106,7 +106,8 @@ OpPtr QueueScheduler::schedule_on(Key key, Kind kind, size_t bytes, const OpPtr 
                 op->dependencies.push_back(std::move(prior));
     }
     op->start = earliest_on(key, resource_queue, dependency, current);
-    op->end = op->start + duration(kind, bytes);
+    if (prediction) op->prediction = *prediction;
+    op->end = op->start + (prediction ? prediction->service_time : duration(kind, bytes));
     pending.emplace(op->end, std::make_pair(key, op));
     include_context(key.context, op->end);
     tails[key] = op;
@@ -118,9 +119,9 @@ OpPtr QueueScheduler::schedule_on(Key key, Kind kind, size_t bytes, const OpPtr 
     return op;
 }
 OpPtr QueueScheduler::schedule(Key key, Kind kind, size_t bytes, const OpPtr &dependency,
-                               Time current) {
+                               Time current, const PredictorResult *prediction) {
     auto *resource_queue = queue_for(*virtual_core_device(device_for(key.context)), kind);
-    return schedule_on(key, kind, bytes, dependency, current, resource_queue);
+    return schedule_on(key, kind, bytes, dependency, current, resource_queue, prediction);
 }
 OpPtr QueueScheduler::schedule_peer(Key key, CUdevice src, CUdevice dst, size_t bytes,
                                     const OpPtr &dependency, Time current) {
@@ -129,7 +130,7 @@ OpPtr QueueScheduler::schedule_peer(Key key, CUdevice src, CUdevice dst, size_t 
         return schedule_on(key, Kind::compute, bytes, dependency, current,
                            &virtual_core_device(dst)->compute_queue);
     return schedule_on(key, Kind::peer, bytes, dependency, current,
-                       &virtual_core_device(src)->p2p_queues.at(dst));
+                       &virtual_core_device(src)->p2p_queues[dst]);
 }
 void QueueScheduler::include_context(CUcontext ctx, Time end) {
     device_for(ctx);
