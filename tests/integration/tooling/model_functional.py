@@ -278,21 +278,32 @@ def verify(args) -> None:
     reference_path = args.evidence / "cpu-reference.json"
     baseline = documents["eager"]
     differences, matched_differences, natural_differences, replay_differences = [], [], [], []
-    output_differences = []
+    output_differences, case_differences = [], []
     for variant, document in documents.items():
         assert [record["case"]["name"] for record in document["records"]] == [case.name for case in CASES]
         assert (document["tp"], document["ep"]) == (args.tp, args.ep)
         assert document["source_sha256"] == baseline["source_sha256"]
         assert document["identity"]["model_config_sha256"] == baseline["identity"]["model_config_sha256"]
         assert document["parameter_bytes"] == baseline["parameter_bytes"]
-        for record in document["records"]:
-            for index in range(len(record["case"]["requests"])):
-                rid = str(index)
+        for record, case in zip(document["records"], CASES, strict=True):
+            expected_case = asdict(case)
+            expected_case["requests"] = list(expected_case["requests"])
+            if record["case"] != expected_case:
+                case_differences.append({"variant": variant, "case": case.name,
+                                         "expected": expected_case, "observed": record["case"]})
+            request_ids = {str(index) for index in range(len(case.requests))}
+            recorded_ids = (set(record["token_ids"]) |
+                            {rid for step in record["steps"] for rid in step["samples"]} |
+                            {item["id"] for step in record["steps"] for item in step["items"]})
+            for rid in sorted(request_ids | recorded_ids):
                 sampled = [token for step in record["steps"] for token in step["samples"].get(rid, [])]
                 reported = record["token_ids"].get(rid, [])
-                if sampled != reported:
-                    output_differences.append({"variant": variant, "case": record["case"]["name"],
-                                               "request": rid, "sampled_tokens": sampled, "reported_tokens": reported})
+                if rid not in request_ids or sampled != reported:
+                    difference = {"variant": variant, "case": case.name, "request": rid,
+                                  "sampled_tokens": sampled, "reported_tokens": reported}
+                    if rid not in request_ids:
+                        difference["unexpected_request"] = True
+                    output_differences.append(difference)
         matched = documents["chunk"] if "chunk" in variant else baseline
         for expected, observed in zip(matched["records"], document["records"], strict=True):
             assert expected["case"] == observed["case"]
@@ -351,6 +362,8 @@ def verify(args) -> None:
         "replay_integrity_differences": replay_differences,
         "native_recorded_outputs_verified": not output_differences,
         "native_recorded_output_differences": output_differences,
+        "native_case_metadata_verified": not case_differences,
+        "native_case_metadata_differences": case_differences,
         "matched_policy_differences": matched_differences,
         "natural_examples_all_variants_exact": not natural_differences,
         "natural_example_differences": natural_differences, "independent_reference_present": reference_path.exists(),
@@ -359,6 +372,7 @@ def verify(args) -> None:
         "cross_prefill_policy_differences": differences}, sort_keys=True))
     print("Cross-prefill-policy exact-token differences:", differences)
     assert not replay_differences, replay_differences
+    assert not case_differences, case_differences
     assert not output_differences, output_differences
     assert not matched_differences, matched_differences
     assert not natural_differences, natural_differences

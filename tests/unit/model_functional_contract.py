@@ -64,6 +64,7 @@ class ModelFunctionalContract(unittest.TestCase):
             self.check(rank)
             self.assertTrue(self.comparison()["original_scheduler_replay_verified"])
             self.assertTrue(self.comparison()["native_recorded_outputs_verified"])
+            self.assertTrue(self.comparison()["native_case_metadata_verified"])
         self.assertNotIn("torch", sys.modules)
         self.assertNotIn("vllm", sys.modules)
 
@@ -142,6 +143,70 @@ class ModelFunctionalContract(unittest.TestCase):
                                            "sampled_tokens": [100], "reported_tokens": tokens or []} for variant in pair])
                         for path, content in originals.items():
                             path.write_text(content)
+
+    def test_unknown_request_ids_cannot_hide_coherent_outputs(self):
+        for pair in (("eager", "graph"), ("chunk", "graph-chunk")):
+            for rank in (0, 1):
+                for mode in ("empty-output", "output", "samples-and-output"):
+                    with self.subTest(pair=pair, rank=rank, mode=mode):
+                        originals = {}
+                        tokens = [] if mode == "empty-output" else [999]
+                        sampled = [999] if mode == "samples-and-output" else []
+                        try:
+                            for variant in pair:
+                                path = self.evidence / variant / f"rank-{rank}-native.json"
+                                originals[path] = path.read_text()
+                                document = json.loads(originals[path])
+                                record = next(r for r in document["records"] if r["case"]["name"] == "cancel-decode")
+                                record["token_ids"]["unknown-request"] = tokens
+                                if sampled:
+                                    record["steps"][0]["samples"]["unknown-request"] = sampled
+                                self.write(path, document)
+                            with self.assertRaises(AssertionError):
+                                self.check(rank)
+                            comparison = self.comparison()
+                            self.assertTrue(comparison["graph_matched_policy_exact"])
+                            self.assertTrue(comparison["original_scheduler_replay_verified"])
+                            self.assertTrue(comparison["native_case_metadata_verified"])
+                            self.assertFalse(comparison["native_recorded_outputs_verified"])
+                            self.assertEqual(comparison["native_recorded_output_differences"],
+                                             [{"variant": variant, "case": "cancel-decode", "request": "unknown-request",
+                                               "sampled_tokens": sampled, "reported_tokens": tokens,
+                                               "unexpected_request": True} for variant in pair])
+                        finally:
+                            for path, content in originals.items():
+                                path.write_text(content)
+
+    def test_coherent_case_metadata_edits_are_rejected_and_saved(self):
+        for pair in (("eager", "graph"), ("chunk", "graph-chunk")):
+            for rank in (0, 1):
+                for mode in ("changed-limit", "removed-declaration-and-output"):
+                    with self.subTest(pair=pair, rank=rank, mode=mode):
+                        originals = {}
+                        try:
+                            for variant in pair:
+                                path = self.evidence / variant / f"rank-{rank}-native.json"
+                                originals[path] = path.read_text()
+                                document = json.loads(originals[path])
+                                record = next(r for r in document["records"] if r["case"]["name"] == "cancel-decode")
+                                if mode == "changed-limit":
+                                    record["case"]["requests"][0]["output"] += 1
+                                else:
+                                    record["case"]["requests"] = []
+                                    record["token_ids"] = {}
+                                self.write(path, document)
+                            with self.assertRaises(AssertionError):
+                                self.check(rank)
+                            comparison = self.comparison()
+                            self.assertTrue(comparison["graph_matched_policy_exact"])
+                            self.assertTrue(comparison["original_scheduler_replay_verified"])
+                            self.assertFalse(comparison["native_case_metadata_verified"])
+                            self.assertEqual([row["variant"] for row in comparison["native_case_metadata_differences"]],
+                                             list(pair))
+                            self.assertEqual(comparison["native_recorded_outputs_verified"], mode == "changed-limit")
+                        finally:
+                            for path, content in originals.items():
+                                path.write_text(content)
 
 
 if __name__ == "__main__":
