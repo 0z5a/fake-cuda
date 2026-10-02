@@ -62,11 +62,11 @@ def replay(registry: Registry, model: CostModel, releases: dict[str, int] | None
     for value in releases.values():
         checked(value)
     estimates = tuple(model.estimate(work) for work in works)
-    groups: dict[str, list[Estimate]] = {}
-    owners: dict[str, str] = {}
+    groups: dict[tuple[str, str], list[Estimate]] = {}
+    owners: dict[str, tuple[str, str]] = {}
     for estimate in estimates:
         work = estimate.work
-        owner = f"fusion:{work.fusion_group}" if work.fusion_group else work.op_id
+        owner = ("fusion", work.fusion_group) if work.fusion_group else ("op", work.op_id)
         groups.setdefault(owner, []).append(estimate)
         owners[work.op_id] = owner
     dependencies = {key: {owners[dep] for estimate in group for dep in estimate.work.deps if owners[dep] != key}
@@ -84,11 +84,11 @@ def replay(registry: Registry, model: CostModel, releases: dict[str, int] | None
             a, b = owners[left.work.op_id], owners[right.work.op_id]
             if a != b:
                 dependencies[b].add(a)
-    completion: dict[str, int] = {}
+    completion: dict[tuple[str, str], int] = {}
     timeline: list[Interval] = []
     device_ready = host_gaps = unknown = 0
     missing = sum(sum(cost.standalone_ns is None for estimate in group for cost in estimate.costs)
-                  if not key.startswith("fusion:") else int(key.removeprefix("fusion:") not in fused or fused[key.removeprefix("fusion:")].standalone_ns is None)
+                  if key[0] == "op" else int(key[1] not in fused or fused[key[1]].standalone_ns is None)
                   for key, group in groups.items())
     while len(completion) < len(groups):
         ready = []
@@ -98,14 +98,15 @@ def replay(registry: Registry, model: CostModel, releases: dict[str, int] | None
             arrival = max(releases.get(estimate.work.op_id, 0) for estimate in group)
             at = max([arrival] + [completion[dep] for dep in dependencies[key]])
             x = group[0].work.execution
-            ready.append((at, x.rank, x.stream, x.sequence, key))
+            name = f"fusion:{key[1]}" if key[0] == "fusion" else key[1]
+            ready.append((at, x.rank, x.stream, x.sequence, name, key))
         if not ready:
             raise ValueError("cyclic dependencies")
-        at, rank, stream, _, key = min(ready)
+        at, rank, stream, _, name, key = min(ready)
         group = groups[key]
-        if key.startswith("fusion:"):
-            cost = fused.get(key.removeprefix("fusion:"), Cost(None, "unsupported", "", "missing physical fusion cost"))
-            physical = [(group[0].work.op_id, Stage(key, "fused_shared", (), ()), cost)]
+        if key[0] == "fusion":
+            cost = fused.get(key[1], Cost(None, "unsupported", "", "missing physical fusion cost"))
+            physical = [(group[0].work.op_id, Stage(name, "fused_shared", (), ()), cost)]
         else:
             estimate = group[0]
             physical = [(estimate.work.op_id, stage, cost) for stage, cost in zip(estimate.lowered.stages, estimate.costs)]

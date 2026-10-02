@@ -277,7 +277,7 @@ def verify(args) -> None:
                  for variant in ("eager", "graph", "chunk", "graph-chunk")}
     reference_path = args.evidence / "cpu-reference.json"
     baseline = documents["eager"]
-    differences, matched_differences, natural_differences = [], [], []
+    differences, matched_differences, natural_differences, replay_differences = [], [], [], []
     for variant, document in documents.items():
         assert [record["case"]["name"] for record in document["records"]] == [case.name for case in CASES]
         assert (document["tp"], document["ep"]) == (args.tp, args.ep)
@@ -301,7 +301,16 @@ def verify(args) -> None:
                 natural_differences.append({"variant": variant, "example": example,
                                             "expected": expected, "observed": observed})
         replay_result = json.loads((args.evidence / variant / f"rank-{args.rank}-replay.json").read_text())
-        assert replay_result["cases"] == len(CASES) and not replay_result["cuda_initialized"]
+        targets = [(step["items"], [step["samples"].get(item["id"], []) for item in step["items"]])
+                   for record in document["records"] for step in record["steps"]]
+        expected_replay = {"cases": len(CASES), "steps": len(targets),
+                           "control_reads": sum(len(items) for items, _ in targets),
+                           "target_sha256": hashlib.sha256(json.dumps(targets, sort_keys=True).encode()).hexdigest(),
+                           "cuda_initialized": False}
+        for field, expected in expected_replay.items():
+            if replay_result[field] != expected:
+                replay_differences.append({"variant": variant, "field": field,
+                                           "expected": expected, "observed": replay_result[field]})
         if "chunk" in variant:
             assert any(0 < item["computed_before"] < item["prompt"]
                        for record in document["records"] for step in record["steps"] for item in step["items"])
@@ -329,6 +338,8 @@ def verify(args) -> None:
                 reference_differences.append({"example": example, "first_different_token": index,
                                               "reference": left[index:], "native": right[index:]})
     (args.evidence / "comparison.json").write_text(json.dumps({"graph_matched_policy_exact": not matched_differences,
+        "original_scheduler_replay_verified": not replay_differences,
+        "replay_integrity_differences": replay_differences,
         "matched_policy_differences": matched_differences,
         "natural_examples_all_variants_exact": not natural_differences,
         "natural_example_differences": natural_differences, "independent_reference_present": reference_path.exists(),
@@ -336,6 +347,7 @@ def verify(args) -> None:
         "independent_reference_differences": reference_differences,
         "cross_prefill_policy_differences": differences}, sort_keys=True))
     print("Cross-prefill-policy exact-token differences:", differences)
+    assert not replay_differences, replay_differences
     assert not matched_differences, matched_differences
     assert not natural_differences, natural_differences
     assert not reference_differences, reference_differences

@@ -160,6 +160,53 @@ class SemanticContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             replay(Registry(ops), ConstantCost(30))
 
+    def test_fusion_prefix_is_an_ordinary_identity(self):
+        op = work(TopK(1, 4, 2), "fusion:p")
+        for fused in ({}, {"p": Cost(50, "synthetic", "fusion_fixture")}):
+            report = replay(Registry((op,)), ConstantCost(30), fused=fused)
+            self.assertEqual(report.makespan_ns, 30)
+            self.assertEqual(report.timeline[0].category, "other")
+            self.assertEqual(report.accounting()["count_coverage"], "1/1")
+
+    def test_fusion_identity_collision_keeps_both_charges(self):
+        ordinary = work(TopK(1, 4, 2), "fusion:p")
+        member = replace(work(TopK(1, 4, 2), "member", stream=1), fusion_group="p")
+        fused = {"p": Cost(50, "synthetic", "fusion_fixture")}
+        report = replay(Registry((ordinary, member)), ConstantCost(30), fused=fused)
+        self.assertEqual(report.makespan_ns, 80)
+        self.assertEqual(report.accounting()["count_coverage"], "2/2")
+        self.assertEqual(report.accounting()["fused_shared_ns"], 50)
+        self.assertAlmostEqual(counterfactual(report, "fused_shared", 2), 80 / 55)
+        incomplete = replay(Registry((ordinary, member)), ConstantCost(30), strict=False)
+        self.assertEqual((incomplete.makespan_ns, incomplete.unknown_count), (None, 1))
+        self.assertEqual([(i.op_id, i.end_ns) for i in incomplete.timeline], [("fusion:p", 30)])
+
+    def test_fusion_identity_collision_preserves_dependency_and_stream_edges(self):
+        ordinary = work(TopK(1, 4, 2), "fusion:p")
+        member = replace(work(TopK(1, 4, 2), "member", stream=1), fusion_group="p")
+        fused = {"p": Cost(50, "synthetic", "fusion_fixture")}
+        for ops, releases, expected in (
+            ((ordinary, replace(member, deps=(ordinary.op_id,))), {ordinary.op_id: 100},
+             [(ordinary.op_id, 100, 130), (member.op_id, 130, 180)]),
+            ((replace(ordinary, deps=(member.op_id,)), member), {},
+             [(member.op_id, 0, 50), (ordinary.op_id, 50, 80)]),
+            ((replace(ordinary, execution=replace(ordinary.execution, sequence=1)),
+              replace(member, execution=replace(member.execution, stream=0))), {},
+             [(member.op_id, 0, 50), (ordinary.op_id, 50, 80)]),
+        ):
+            with self.subTest(expected=expected):
+                report = replay(Registry(ops), ConstantCost(30), releases, fused)
+                self.assertEqual([(i.op_id, i.start_ns, i.end_ns) for i in report.timeline], expected)
+
+    def test_fusion_ties_preserve_display_name_order(self):
+        ordinary = work(TopK(1, 4, 2), "a")
+        member = replace(work(TopK(1, 4, 2), "member"), fusion_group="p")
+        member = replace(member, execution=replace(member.execution, context="another"))
+        report = replay(Registry((member, ordinary)), ConstantCost(30),
+                        fused={"p": Cost(50, "synthetic", "fusion_fixture")})
+        self.assertEqual([i.op_id for i in report.timeline], ["a", "member"])
+        self.assertEqual(report.timeline[1].stage, "fusion:p")
+
     def test_profiles_modes_and_coverage(self):
         spec = TopK(4, 256, 8)
         op = work(spec)
