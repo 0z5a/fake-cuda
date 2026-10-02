@@ -22,24 +22,52 @@ void VirtualMemory::reap(Time now) {
     }
 }
 
-CUresult VirtualMemory::check_bounds(CUcontext ctx, CUdeviceptr ptr, size_t bytes) const {
+const Allocation *VirtualMemory::find(CUdeviceptr ptr, size_t bytes) const {
     auto it = allocations.upper_bound(ptr);
-    if (it == allocations.begin()) return CUDA_ERROR_INVALID_VALUE;
+    if (it == allocations.begin()) return nullptr;
     --it;
     const Allocation &a = it->second;
-    return a.context == ctx && ptr >= it->first && ptr - it->first <= a.size &&
-           bytes <= a.size - static_cast<size_t>(ptr - it->first) && !a.freeing
-           ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+    if (ptr - it->first > a.size || bytes > a.size - static_cast<size_t>(ptr - it->first) || a.freeing)
+        return nullptr;
+    return &a;
 }
-CUresult VirtualMemory::check_pointer(CUcontext ctx, CUdeviceptr ptr, size_t bytes, Time when) const {
-    auto it = allocations.upper_bound(ptr);
-    if (it == allocations.begin()) return CUDA_ERROR_INVALID_VALUE;
-    --it;
-    const Allocation &a = it->second;
-    if (a.context != ctx || ptr < it->first || ptr - it->first > a.size ||
-        bytes > a.size - static_cast<size_t>(ptr - it->first) || when < a.ready || a.freeing || when >= a.released)
+bool VirtualMemory::accessible(CUcontext ctx, CUcontext owner) const {
+    return ctx == owner || peers.contains({ctx, owner});
+}
+CUresult VirtualMemory::check_bounds(CUcontext ctx, CUdeviceptr ptr, size_t bytes, bool mapped) const {
+    const auto *a = find(ptr, bytes);
+    return a && (mapped ? accessible(ctx, a->context) : ctx == a->context)
+        ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+}
+CUresult VirtualMemory::check_pointer(CUcontext ctx, CUdeviceptr ptr, size_t bytes, Time when, bool mapped) const {
+    const auto *a = find(ptr, bytes);
+    return a && (mapped ? accessible(ctx, a->context) : ctx == a->context) &&
+        when >= a->ready && when < a->released ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+}
+CUresult VirtualMemory::copy_node(CUcontext ctx, CUdeviceptr dst, CUdeviceptr src, size_t bytes, Node &node) const {
+    const auto *destination = find(dst, bytes), *source = find(src, bytes);
+    if (!destination || !source || !accessible(ctx, destination->context) || !accessible(ctx, source->context))
         return CUDA_ERROR_INVALID_VALUE;
+    node = {source->device == destination->device ? Kind::compute : Kind::peer,
+            bytes, nullptr, dst, src};
+    node.first_context = destination->context;
+    node.second_context = source->context;
     return CUDA_SUCCESS;
+}
+void VirtualMemory::include_use(CUdeviceptr ptr, Time end) {
+    auto it = allocations.upper_bound(ptr);
+    --it; // The caller has validated the pointer under the same scheduler lock.
+    it->second.last_use = std::max(it->second.last_use, end);
+}
+CUresult VirtualMemory::enable_peer(CUcontext ctx, CUcontext peer) {
+    return peers.insert({ctx, peer}).second ? CUDA_SUCCESS : CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
+}
+CUresult VirtualMemory::disable_peer(CUcontext ctx, CUcontext peer) {
+    return peers.erase({ctx, peer}) ? CUDA_SUCCESS : CUDA_ERROR_PEER_ACCESS_NOT_ENABLED;
+}
+void VirtualMemory::revoke_peer(CUcontext ctx) {
+    for (auto it = peers.begin(); it != peers.end();)
+        if (it->first == ctx || it->second == ctx) it = peers.erase(it); else ++it;
 }
 CUresult VirtualMemory::allocate(CUcontext ctx, CUdevice ordinal, CUdeviceptr *ptr, size_t bytes, Time ready) {
     if (!ptr || !bytes) return CUDA_ERROR_INVALID_VALUE;
@@ -60,12 +88,14 @@ CUresult VirtualMemory::attribute(CUcontext ctx, void *data, CUpointer_attribute
     if (it == allocations.begin()) return CUDA_ERROR_INVALID_VALUE;
     --it;
     const Allocation &a = it->second;
-    if (a.context != ctx || a.freeing || ptr < it->first || ptr - it->first >= a.size)
+    if (a.freeing || ptr - it->first >= a.size)
         return CUDA_ERROR_INVALID_VALUE;
     switch (attribute) {
     case CU_POINTER_ATTRIBUTE_CONTEXT: *static_cast<CUcontext *>(data) = a.context; break;
     case CU_POINTER_ATTRIBUTE_MEMORY_TYPE: *static_cast<CUmemorytype *>(data) = CU_MEMORYTYPE_DEVICE; break;
-    case CU_POINTER_ATTRIBUTE_DEVICE_POINTER: *static_cast<CUdeviceptr *>(data) = ptr; break;
+    case CU_POINTER_ATTRIBUTE_DEVICE_POINTER:
+        if (!accessible(ctx, a.context)) return CUDA_ERROR_INVALID_VALUE;
+        *static_cast<CUdeviceptr *>(data) = ptr; break;
     case CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL: *static_cast<int *>(data) = a.device; break;
     case CU_POINTER_ATTRIBUTE_IS_MANAGED:
     case CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE:
@@ -82,7 +112,7 @@ CUresult VirtualMemory::free(CUcontext ctx, CUdeviceptr ptr, Time &finish) {
     auto it = allocations.find(ptr);
     if (it == allocations.end() || it->second.context != ctx || it->second.freeing)
         return CUDA_ERROR_INVALID_VALUE;
-    finish = std::max(finish, it->second.ready);
+    finish = std::max({finish, it->second.ready, it->second.last_use});
     releases.emplace(finish, ptr);
     it->second.freeing = true;
     it->second.released = finish;
@@ -91,7 +121,7 @@ CUresult VirtualMemory::free(CUcontext ctx, CUdeviceptr ptr, Time &finish) {
 CUresult VirtualMemory::can_free_async(CUcontext ctx, CUdeviceptr ptr, Time earliest) const {
     auto it = allocations.find(ptr);
     return it == allocations.end() || it->second.context != ctx || it->second.freeing ||
-           earliest < it->second.ready ? CUDA_ERROR_INVALID_VALUE : CUDA_SUCCESS;
+           earliest < it->second.ready || earliest < it->second.last_use ? CUDA_ERROR_INVALID_VALUE : CUDA_SUCCESS;
 }
 void VirtualMemory::free_async(CUdeviceptr ptr, Time finish) {
     releases.emplace(finish, ptr);
@@ -100,6 +130,7 @@ void VirtualMemory::free_async(CUdeviceptr ptr, Time finish) {
     allocation.freeing = true;
 }
 void VirtualMemory::retire_context(CUcontext ctx) {
+    revoke_peer(ctx);
     for (auto it = releases.begin(); it != releases.end();)
         if (auto allocation = allocations.find(it->second);
             allocation != allocations.end() && allocation->second.context == ctx)

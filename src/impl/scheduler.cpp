@@ -55,8 +55,17 @@ CUresult Scheduler::enqueue(Key key, Node node, OpPtr *result) {
         if (status != CUDA_SUCCESS) return status;
     }
     OpPtr dependency = node.kind == Kind::wait ? event->second.record : OpPtr{};
-    OpPtr op = queue.schedule(key, node.kind, node.bytes, dependency, VirtualClock::now(),
-                             predictions.empty() ? nullptr : &predictions.front());
+    OpPtr op = node.first_context
+        ? queue.schedule_peer(key, queue.device_for(node.second_context), queue.device_for(node.first_context),
+                              node.bytes, dependency)
+        : queue.schedule(key, node.kind, node.bytes, dependency, VirtualClock::now(),
+                         predictions.empty() ? nullptr : &predictions.front());
+    if (node.first_context) {
+        queue.include_context(node.first_context, op->end);
+        queue.include_context(node.second_context, op->end);
+        memory.include_use(node.first, op->end);
+        memory.include_use(node.second, op->end);
+    }
     op->launch = std::move(node.launch);
     if (node.kind == Kind::record) event->second.record = op;
     if (result) *result = std::move(op);
@@ -67,7 +76,9 @@ CUresult Scheduler::enqueue(Key key, Node node, OpPtr *result) {
 CUresult Scheduler::begin_retire_context(CUcontext ctx) {
     return protect([&] {
         std::scoped_lock lock(mutex);
-        return retired.insert(ctx).second ? CUDA_SUCCESS : CUDA_ERROR_INVALID_CONTEXT;
+        if (!retired.insert(ctx).second) return CUDA_ERROR_INVALID_CONTEXT;
+        memory.revoke_peer(ctx);
+        return CUDA_SUCCESS;
     });
 }
 void Scheduler::retire_stream(CUcontext ctx, CUstream stream) {

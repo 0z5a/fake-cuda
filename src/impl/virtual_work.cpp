@@ -22,15 +22,22 @@ CUresult copy_work(CUstream stream, Kind kind, size_t bytes, int async,
         s.reap();
         if (bytes && !host && (kind == Kind::h2d || kind == Kind::d2h)) return CUDA_ERROR_INVALID_VALUE;
         bool is_capture = s.graph.capturing(key);
+        Node node{kind, bytes, nullptr, first, second};
+        const bool d2d = kind == Kind::compute && second;
+        if (d2d && s.memory.copy_node(ctx, first, second, bytes, node) != CUDA_SUCCESS)
+            return CUDA_ERROR_INVALID_VALUE;
+        const Time earliest = d2d
+            ? s.queue.earliest_peer(key, s.queue.device_for(node.second_context), s.queue.device_for(node.first_context))
+            : s.queue.earliest(key, kind);
         auto valid = [&](CUdeviceptr ptr) {
-            return is_capture ? s.memory.check_bounds(ctx, ptr, bytes) :
-                                s.memory.check_pointer(ctx, ptr, bytes, s.queue.earliest(key, kind));
+            return is_capture ? s.memory.check_bounds(ctx, ptr, bytes, d2d) :
+                                s.memory.check_pointer(ctx, ptr, bytes, earliest, d2d);
         };
         if ((first && valid(first) != CUDA_SUCCESS) || (second && valid(second) != CUDA_SUCCESS))
             return CUDA_ERROR_INVALID_VALUE;
         if (!async && is_capture) return s.graph.invalidate(key);
         OpPtr op;
-        CUresult result = s.enqueue(key, {kind, bytes, nullptr, first, second}, &op);
+        CUresult result = s.enqueue(key, node, &op);
         if (op) finish = op->end;
         return result;
     });
@@ -69,6 +76,20 @@ CUresult virtual_synchronize_context(CUcontext ctx) {
 }
 CUresult virtual_begin_retire_context(CUcontext ctx) {
     return scheduler().begin_retire_context(ctx);
+}
+CUresult virtual_enable_peer(CUcontext ctx, CUcontext peer) {
+    try {
+        Scheduler &s = scheduler();
+        std::scoped_lock lock(s.mutex);
+        if (s.retired.contains(ctx) || s.retired.contains(peer)) return CUDA_ERROR_INVALID_CONTEXT;
+        return s.memory.enable_peer(ctx, peer);
+    } catch (const std::bad_alloc &) { return CUDA_ERROR_OUT_OF_MEMORY; }
+}
+CUresult virtual_disable_peer(CUcontext ctx, CUcontext peer) {
+    Scheduler &s = scheduler();
+    std::scoped_lock lock(s.mutex);
+    if (s.retired.contains(ctx) || s.retired.contains(peer)) return CUDA_ERROR_INVALID_CONTEXT;
+    return s.memory.disable_peer(ctx, peer);
 }
 void virtual_drain_context(CUcontext ctx) {
     Time end{};
@@ -187,6 +208,8 @@ CUresult virtual_memcpy_peer(CUdeviceptr dst, CUcontext dst_context, CUdeviceptr
             s.memory.check_pointer(src_context, src, bytes, at) != CUDA_SUCCESS)
             return CUDA_ERROR_INVALID_VALUE;
         OpPtr op = s.queue.schedule_peer(key, src_device, dst_device, bytes);
+        s.memory.include_use(src, op->end);
+        s.memory.include_use(dst, op->end);
         if (src_context != dst_context) s.queue.include_context(src_context, op->end);
         finish = op->end;
         return CUDA_SUCCESS;

@@ -36,6 +36,8 @@ struct Node {
     CUdeviceptr first = 0, second = 0;
     int priority = 0;
     std::shared_ptr<const KernelLaunch> launch = nullptr;
+    // Allocation owners for ordinary D2D, retained through capture/replay.
+    CUcontext first_context = nullptr, second_context = nullptr;
 };
 
 struct Event {

@@ -71,7 +71,6 @@ private:
     std::vector<std::shared_ptr<Device>> devices_;
     std::unordered_map<CUcontext, std::shared_ptr<Context>> contexts_;
     // Directed peer access: source context -> destination contexts.
-    std::map<CUcontext, std::set<CUcontext>> peers_;
     std::unordered_map<CUstream, std::shared_ptr<Stream>> streams_;
 };
 } // namespace fake_cuda
