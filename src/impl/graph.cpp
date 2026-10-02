@@ -35,8 +35,18 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
         if (node.event && (s.events.find(node.event) == s.events.end() ||
                            s.events.at(node.event).context != ctx))
             return CUDA_ERROR_INVALID_HANDLE;
-        if ((node.first && s.memory.check_bounds(ctx, node.first, node.bytes) != CUDA_SUCCESS) ||
-            (node.second && s.memory.check_bounds(ctx, node.second, node.bytes) != CUDA_SUCCESS))
+        const bool mapped = node.first_context != nullptr;
+        if (mapped != (node.second_context != nullptr) || (node.kind == Kind::peer && !mapped))
+            return CUDA_ERROR_INVALID_VALUE;
+        if (mapped) {
+            Node resolved;
+            if (s.memory.copy_node(ctx, node.first, node.second, node.bytes, resolved) != CUDA_SUCCESS ||
+                resolved.first_context != node.first_context || resolved.second_context != node.second_context ||
+                resolved.kind != node.kind)
+                return CUDA_ERROR_INVALID_VALUE;
+        }
+        if ((node.first && s.memory.check_bounds(ctx, node.first, node.bytes, mapped) != CUDA_SUCCESS) ||
+            (node.second && s.memory.check_bounds(ctx, node.second, node.bytes, mapped) != CUDA_SUCCESS))
             return CUDA_ERROR_INVALID_VALUE;
     }
     auto *device = fake_cuda::virtual_core_device(s.queue.device_for(ctx));
@@ -64,31 +74,40 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
     Time launch_time = VirtualClock::now();
     std::vector<Time> predicted(nodes_.size());
     std::vector<Time> lane_end(lanes_, s.queue.earliest(key, Kind::marker, completion, launch_time));
-    Time h2d_available = device->h2d_queue.available_at();
-    Time d2h_available = device->d2h_queue.available_at();
-    Time compute_available = device->compute_queue.available_at();
-    auto resource_time = [&](Kind kind) -> Time * {
-        switch (kind) {
-        case Kind::h2d: return &h2d_available;
-        case Kind::d2h: return &d2h_available;
+    std::map<ExecutionQueue *, Time> resources;
+    auto resource_time = [&](const Node &node) -> Time * {
+        ExecutionQueue *resource = nullptr;
+        switch (node.kind) {
+        case Kind::h2d: resource = &device->h2d_queue; break;
+        case Kind::d2h: resource = &device->d2h_queue; break;
         case Kind::compute:
-        case Kind::kernel: return &compute_available;
+            resource = node.first_context
+                ? &fake_cuda::virtual_core_device(s.queue.device_for(node.first_context))->compute_queue
+                : &device->compute_queue;
+            break;
+        case Kind::kernel: resource = &device->compute_queue; break;
+        case Kind::peer:
+            resource = &fake_cuda::virtual_core_device(s.queue.device_for(node.second_context))->p2p_queues[
+                s.queue.device_for(node.first_context)];
+            break;
         default: return nullptr;
         }
+        return &resources.try_emplace(resource, resource->available_at()).first->second;
     };
     for (size_t i = 0; i < nodes_.size(); ++i) {
         const GraphNode &entry = nodes_[i];
         const Node &node = entry.node;
         Time at = std::max(launch_time, lane_end[entry.lane]);
-        Time *available = resource_time(node.kind);
+        Time *available = resource_time(node);
         if (available) at = std::max(at, *available);
         if (entry.event_dependency != no_node) at = std::max(at, predicted[entry.event_dependency]);
         else if (node.kind == Kind::wait) {
             auto record = s.events.at(node.event).record;
             if (record) at = std::max(at, record->end);
         }
-        if ((node.first && s.memory.check_pointer(ctx, node.first, node.bytes, at) != CUDA_SUCCESS) ||
-            (node.second && s.memory.check_pointer(ctx, node.second, node.bytes, at) != CUDA_SUCCESS))
+        const bool mapped = node.first_context != nullptr;
+        if ((node.first && s.memory.check_pointer(ctx, node.first, node.bytes, at, mapped) != CUDA_SUCCESS) ||
+            (node.second && s.memory.check_pointer(ctx, node.second, node.bytes, at, mapped) != CUDA_SUCCESS))
             return CUDA_ERROR_INVALID_VALUE;
         const auto *prediction = prediction_for(i);
         predicted[i] = at + (prediction ? prediction->service_time : QueueScheduler::duration(node.kind, node.bytes));
@@ -107,7 +126,16 @@ CUresult Graph::launch(Scheduler &s, Key key, OpPtr &completion) const {
         if (entry.event_dependency != no_node) dependency = replay[entry.event_dependency];
         else if (node.kind == Kind::wait) dependency = s.events.at(node.event).record;
         Key lane = lanes[entry.lane];
-        OpPtr op = s.queue.schedule(lane, node.kind, node.bytes, dependency, launch_time, prediction_for(i));
+        OpPtr op = node.first_context
+            ? s.queue.schedule_peer(lane, s.queue.device_for(node.second_context), s.queue.device_for(node.first_context),
+                                    node.bytes, dependency, launch_time)
+            : s.queue.schedule(lane, node.kind, node.bytes, dependency, launch_time, prediction_for(i));
+        if (node.first_context) {
+            s.queue.include_context(node.first_context, op->end);
+            s.queue.include_context(node.second_context, op->end);
+            s.memory.include_use(node.first, op->end);
+            s.memory.include_use(node.second, op->end);
+        }
         op->launch = node.launch;
         if (node.kind == Kind::record) s.events.at(node.event).record = op;
         exits[entry.lane] = op;

@@ -13,6 +13,8 @@ The qualified path is **U1**: original vLLM 0.30.0 `Scheduler` and `KVCacheManag
 
 Each synchronous step cost includes host/communication inside `LLMEngine.step()`. Do not add a kernel or collective estimate to it. The Driver's kernel-only `PerformanceModel` remains a separate API and rejects whole-forward costs. Request admission/loop overhead outside the measured step remains unmodeled. Predictor and IPC wall time affect simulator speed only.
 
+`vllm.explicit.UniformStepCost` also exposes the frozen whole-step table to the separate `sim.serving` request/memory policy. It admits homogeneous contexts and fresh unchunked prefill only. Continued chunks, mixed phases and heterogeneous contexts need independent native whole-step costs. The original Scheduler/KV manager continues to run through U1; the explicit policy is not presented as a replacement for its decisions. Empty inter-token populations return null. [M2/EP contracts and counterfactual scopes](../results/2026-10-01/serving-ep.md).
+
 The AIS identity contains model-config and hardware-profile hashes, backend/version, dtype, attention backend, graph mode, TP/PP/attention-DP/CP/MoE-TP/MoE-EP, KV block size and accounting scope. Regression fitting consumes seconds; the native estimate returns milliseconds; the adapter returns nanoseconds. Homogeneous prefill/decode metrics use complete scheduled/queued FPM fields. Heterogeneous or mixed steps, extrapolation, unsupported layouts and absent estimates fail explicitly. The installed native op-level database rejects vLLM 0.30.0 on `a100_sxm`; it must not be relabeled as 0.14.0. Regression is an explicitly chosen mode.
 
 ## Reproduce the controlled campaign

@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <vector>
 
 namespace {
@@ -48,7 +50,16 @@ constexpr char kernel[] = R"ptx(
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) { std::fprintf(stderr, "usage: %s /path/to/real/libcuda.so.1\n", argv[0]); return 1; }
+    if (argc != 2 && argc != 3) {
+        std::fprintf(stderr, "usage: %s /path/to/real/libcuda.so.1 [kernel.cubin]\n", argv[0]); return 1;
+    }
+    std::vector<char> image;
+    if (argc == 3) {
+        std::ifstream file(argv[2], std::ios::binary);
+        if (!file) { std::fprintf(stderr, "cannot open kernel image: %s\n", argv[2]); return 1; }
+        image.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        if (file.bad() || image.empty()) { std::fprintf(stderr, "cannot read kernel image: %s\n", argv[2]); return 1; }
+    }
     driver = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (!driver) { std::fprintf(stderr, "%s\n", dlerror()); return 1; }
     OK(cuInit, 0);
@@ -86,8 +97,13 @@ int main(int argc, char **argv) {
         CUcontext context; CUmodule module; CUfunction function; CUstream a, b;
         CUevent fork, join; CUdeviceptr input, output; void *host_input, *host_output;
         OK(cuCtxCreate_v4, &context, nullptr, 0, ordinal);
-        OK(cuModuleLoadData, &module, kernel);
+        OK(cuModuleLoadData, &module, image.empty() ? static_cast<const void *>(kernel) : image.data());
         OK(cuModuleGetFunction, &function, module, "double_u32");
+        if (!image.empty()) {
+            int binary_version = 0;
+            OK(cuFuncGetAttribute, &binary_version, CU_FUNC_ATTRIBUTE_BINARY_VERSION, function);
+            std::printf("Loaded cubin: device %d, binary version %d\n", ordinal, binary_version);
+        }
         OK(cuStreamCreate, &a, CU_STREAM_NON_BLOCKING); OK(cuStreamCreate, &b, CU_STREAM_NON_BLOCKING);
         OK(cuEventCreate, &fork, CU_EVENT_DISABLE_TIMING); OK(cuEventCreate, &join, CU_EVENT_DISABLE_TIMING);
         OK(cuMemAlloc_v2, &input, bytes); OK(cuMemAlloc_v2, &output, bytes);

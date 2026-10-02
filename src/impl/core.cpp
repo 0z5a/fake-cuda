@@ -99,12 +99,6 @@ void Registry::retire_locked(const std::shared_ptr<Context>& context) {
         else ++it;
     }
     contexts_.erase(context->handle());
-    peers_.erase(context->handle());
-    for (auto it = peers_.begin(); it != peers_.end();) {
-        it->second.erase(context->handle());
-        if (it->second.empty()) it = peers_.erase(it);
-        else ++it;
-    }
     if (thread_.current == context) thread_.current.reset();
     for (auto& item : thread_.stack) if (item == context) item.reset();
 }
@@ -315,15 +309,7 @@ CUresult Registry::peer_enable(CUcontext peer, unsigned int flags) {
     if (!current || !other || current == other) return CUDA_ERROR_INVALID_CONTEXT;
     if (!device_configuration().can_access(current->device_ordinal(), other->device_ordinal()))
         return CUDA_ERROR_PEER_ACCESS_UNSUPPORTED;
-    try {
-        auto& enabled = peers_[current->handle()];
-        if (!enabled.insert(peer).second) return CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
-    } catch (const std::bad_alloc&) {
-        auto it = peers_.find(current->handle());
-        if (it != peers_.end() && it->second.empty()) peers_.erase(it);
-        return CUDA_ERROR_OUT_OF_MEMORY;
-    }
-    return CUDA_SUCCESS;
+    return virtual_enable_peer(current->handle(), peer);
 }
 CUresult Registry::peer_disable(CUcontext peer) {
     std::lock_guard lock(mutex_);
@@ -332,11 +318,7 @@ CUresult Registry::peer_disable(CUcontext peer) {
     if (!current || !other || current == other) return CUDA_ERROR_INVALID_CONTEXT;
     if (current->device_ordinal() == other->device_ordinal())
         return CUDA_ERROR_PEER_ACCESS_UNSUPPORTED;
-    auto it = peers_.find(current->handle());
-    if (it == peers_.end() || !it->second.erase(peer))
-        return CUDA_ERROR_PEER_ACCESS_NOT_ENABLED;
-    if (it->second.empty()) peers_.erase(it);
-    return CUDA_SUCCESS;
+    return virtual_disable_peer(current->handle(), peer);
 }
 CUresult Registry::stream_create(CUstream *out, unsigned int flags, int priority) {
     if (!out) return CUDA_ERROR_INVALID_VALUE;

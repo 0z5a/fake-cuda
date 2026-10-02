@@ -20,6 +20,9 @@ CUresult virtual_synchronize_stream(CUcontext context, CUstream stream, bool que
 CUresult virtual_synchronize_context(CUcontext context);
 // Called under the registry lock: excludes already-resolved calls from enqueueing.
 CUresult virtual_begin_retire_context(CUcontext context);
+// Registry validates live contexts/capabilities before taking the scheduler lock.
+CUresult virtual_enable_peer(CUcontext context, CUcontext peer);
+CUresult virtual_disable_peer(CUcontext context, CUcontext peer);
 void virtual_drain_context(CUcontext context);
 void virtual_retire_stream(CUcontext context, CUstream stream);
 void virtual_retire_context(CUcontext context);

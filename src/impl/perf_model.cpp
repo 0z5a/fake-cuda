@@ -19,6 +19,9 @@ PredictionBatch SyntheticConstant::predict(std::span<const KernelQuery> queries)
     for (const auto &query : queries) {
         auto prediction = synthetic_kernel_prediction();
         prediction.covered_invocation = query.invocation_id;
+        if (query.launch && query.launch->semantic)
+            prediction.semantic = std::make_shared<SemanticBinding>(SemanticBinding{
+                query.launch->semantic, query.invocation_id, query.launch->semantic->payload});
         batch.results.push_back(std::move(prediction));
     }
     return batch;
@@ -33,6 +36,14 @@ std::string validate_predictions(std::span<const KernelQuery> queries, const Pre
         if (!queries[i].invocation_id || prediction.covered_invocation != queries[i].invocation_id ||
             !covered.insert(prediction.covered_invocation).second)
             return "kernel invocation coverage mismatch";
+        const auto origin = queries[i].launch ? queries[i].launch->semantic : nullptr;
+        if (origin || prediction.semantic) {
+            if (!origin || origin->schema != 1 || origin->op_id.empty() || origin->payload.empty() ||
+                !prediction.semantic || prediction.semantic->origin != origin ||
+                prediction.semantic->invocation_id != queries[i].invocation_id ||
+                prediction.semantic->payload.empty())
+                return "semantic invocation binding mismatch";
+        }
     }
     return {};
 }
@@ -48,6 +59,8 @@ PredictionBatch MeasuredReplay::predict(std::span<const KernelQuery> queries) co
             return {{}, "missing launch, load identity or profile"};
         const auto &launch = *query.launch;
         const auto &expected = sample.launch;
+        if (launch.semantic || expected.semantic)
+            return {{}, "measured kernel replay requires an explicit semantic binding provider"};
         if (launch.parameters != ParameterEncoding::packed_buffer ||
             expected.parameters != ParameterEncoding::packed_buffer)
             return {{}, "unknown parameter layout"};

@@ -157,7 +157,10 @@ int main(int argc, char **argv) {
         CHECK(total_bytes - free_bytes == BYTES); /* Capacity is per device. */
         OK(api.pointer_attribute(&ordinal, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, ptr[i]));
         CHECK(ordinal == i);
-        ERROR(api.pointer_attribute(&ordinal, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, ptr[1 - i]),
+        OK(api.pointer_attribute(&ordinal, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, ptr[1 - i]));
+        CHECK(ordinal == 1 - i); /* UVA ownership metadata is not mapping permission. */
+        CUdeviceptr accessible = 0;
+        ERROR(api.pointer_attribute(&accessible, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, ptr[1 - i]),
               CUDA_ERROR_INVALID_VALUE);
     }
     OK(api.set(ctx[0]));
@@ -167,6 +170,11 @@ int main(int argc, char **argv) {
     OK(api.enable_peer(ctx[1], 0));
     ERROR(api.enable_peer(ctx[1], 0), CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED);
     OK(api.set(ctx[1])); OK(api.enable_peer(ctx[0], 0));
+    CUdeviceptr mapped_pointer = 0;
+    OK(api.pointer_attribute(&mapped_pointer, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, ptr[0]));
+    CHECK(mapped_pointer == ptr[0]);
+    OK(api.d2d(ptr[1], ptr[0], 1, streams[1][0]));
+    OK(api.sync_stream(streams[1][0]));
 
     /* Six concurrent copies: H2D, D2H and compute must be separate on each
      * device, and identical queues on different devices must not serialize. */
